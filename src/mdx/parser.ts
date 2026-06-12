@@ -219,9 +219,50 @@ export class MDXParser {
     };
   }
 
+  /**
+   * Split content into alternating text/code segments based on fenced code
+   * blocks (``` or ~~~). Preprocessing transforms must never touch code.
+   */
+  private splitByCodeFences(content: string): Array<{ type: 'text' | 'code'; text: string }> {
+    const segments: Array<{ type: 'text' | 'code'; text: string }> = [];
+    const lines = content.split('\n');
+    let buffer: string[] = [];
+    let fence: { char: string; length: number } | null = null;
+
+    const flush = (type: 'text' | 'code') => {
+      if (buffer.length > 0) {
+        segments.push({ type, text: buffer.join('\n') });
+        buffer = [];
+      }
+    };
+
+    for (const line of lines) {
+      const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (!fence && fenceMatch) {
+        flush('text');
+        fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+        buffer.push(line);
+      } else if (fence && fenceMatch && fenceMatch[1][0] === fence.char && fenceMatch[1].length >= fence.length && line.trim() === fenceMatch[1]) {
+        buffer.push(line);
+        flush('code');
+        fence = null;
+      } else {
+        buffer.push(line);
+      }
+    }
+    flush(fence ? 'code' : 'text');
+    return segments;
+  }
+
   private preprocessContent(content: string, frontmatter: Record<string, unknown>): string {
+    return this.splitByCodeFences(content)
+      .map((seg) => (seg.type === 'code' ? seg.text : this.preprocessTextSegment(seg.text, frontmatter)))
+      .join('\n');
+  }
+
+  private preprocessTextSegment(content: string, frontmatter: Record<string, unknown>): string {
     let result = content;
-    
+
     // 1. Substitute frontmatter variables like {{ key }}
     result = result.replace(/\{\{(\s*\w+\s*)\}\}/g, (match, varName) => {
       const key = varName.trim();
@@ -231,32 +272,60 @@ export class MDXParser {
       }
       return match;
     });
-    
+
     // 2. Preprocess block math on single lines to multiple lines
     result = result.replace(/\$\$([^\n$]+)\$\$/g, '\n$$$$\n$1\n$$$$\n');
-    
-    // 3. Preprocess lettered lists (a., b., a), b)) to numbered lists
-    const lines = result.split('\n');
-    const processedLines = lines.map(line => {
-      const match = line.match(/^(\s*)([a-zA-Z])[.)]\s+(.+)$/);
-      if (match) {
-        const indent = match[1];
-        const text = match[3];
-        return `${indent}1. ${text}`;
-      }
-      return line;
-    });
-    result = processedLines.join('\n');
-    
+
+    // 3. Preprocess lettered lists to numbered lists. Only convert runs that
+    // start with "a." / "a)" so prose lines like "v. Chod" are left alone.
+    result = this.preprocessLetteredLists(result);
+
     // 4. Preprocess definition lists (Term\n: Definition) to custom HTML tags
     result = this.preprocessDefinitionLists(result);
-    
+
     // 5. Preprocess spaces in internal links so they are parsed as links
     result = result.replace(/\[([^\]]+)\]\((#[^)]+)\)/g, (match, text, url) => {
       return `[${text}](${url.replace(/\s+/g, '%20')})`;
     });
-    
+
     return result;
+  }
+
+  private preprocessLetteredLists(content: string): string {
+    const lines = content.split('\n');
+    const itemRegex = /^(\s*)([a-zA-Z])[.)]\s+(.+)$/;
+
+    for (let i = 0; i < lines.length; i++) {
+      const start = lines[i].match(itemRegex);
+      if (!start || start[2].toLowerCase() !== 'a') continue;
+
+      // Collect the run of lettered items with the same indentation,
+      // allowing blank lines between items.
+      const indent = start[1];
+      const runIndices: number[] = [i];
+      let j = i + 1;
+      while (j < lines.length) {
+        if (lines[j].trim() === '') {
+          j++;
+          continue;
+        }
+        const m = lines[j].match(itemRegex);
+        if (m && m[1] === indent) {
+          runIndices.push(j);
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      for (const idx of runIndices) {
+        const m = lines[idx].match(itemRegex)!;
+        lines[idx] = `${m[1]}1. ${m[3]}`;
+      }
+      i = j - 1;
+    }
+
+    return lines.join('\n');
   }
   
   private preprocessDefinitionLists(content: string): string {
@@ -786,13 +855,25 @@ export class MDXParser {
     return results;
   }
 
+  /**
+   * The leading H1 is only treated as the page title when it is the first
+   * non-blank line of the document (mirrors Docusaurus's contentTitle).
+   * Matching anywhere would corrupt e.g. "# comment" lines in code blocks.
+   */
+  private matchLeadingHeading(content: string): { title: string; rest: string } | null {
+    const match = content.match(/^(?:[ \t]*\r?\n)* {0,3}#[ \t]+(.+?)[ \t]*#*[ \t]*(\r?\n|$)([\s\S]*)$/);
+    if (!match) return null;
+    return { title: match[1].trim(), rest: match[3] };
+  }
+
   private extractTitle(content: string): string {
-    const match = content.match(/^#\s+(.+)$/m);
-    return match ? match[1].trim() : 'Untitled';
+    const match = this.matchLeadingHeading(content);
+    return match ? match.title : 'Untitled';
   }
 
   private removeFirstHeading(content: string): string {
-    return content.replace(/^#\s+.+$/m, '').replace(/^\n+/, '');
+    const match = this.matchLeadingHeading(content);
+    return match ? match.rest.replace(/^\n+/, '') : content;
   }
 
   private simpleHash(s: string): string {

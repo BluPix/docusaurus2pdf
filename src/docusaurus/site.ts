@@ -264,7 +264,20 @@ export class SiteLoader {
   }
 
   private extractTitle(content: string): string {
-    const match = content.match(/^#\s+(.+)$/m);
+    // Frontmatter title wins; otherwise use the H1 only when it is the first
+    // non-blank line after frontmatter (a "# ..." inside a code block must not match).
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+    let body = content;
+    if (fmMatch) {
+      try {
+        const fm = YAML.parse(fmMatch[1]);
+        if (fm && typeof fm.title === 'string') return fm.title.trim();
+      } catch {
+        // ignore malformed frontmatter
+      }
+      body = content.slice(fmMatch[0].length);
+    }
+    const match = body.match(/^(?:[ \t]*\r?\n)* {0,3}#[ \t]+(.+?)[ \t]*#*[ \t]*(\r?\n|$)/);
     return match ? match[1].trim() : 'Untitled';
   }
 

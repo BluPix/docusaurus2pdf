@@ -39,3 +39,6 @@ pdf-export-facebook/
 /dist
 /node_modules
 scripts/download-test-docs.sh
+
+# Local conversion output
+output/
