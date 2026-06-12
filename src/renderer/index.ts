@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { SiteLoader } from '../docusaurus/site.js';
 import { MDXParser, MDXParserOptions } from '../mdx/parser.js';
 import { LatexGenerator } from '../latex/generator.js';
-import { Site, DocPage, RendererOptions, DocumentSection } from '../types/index.js';
+import { Site, DocPage, RendererOptions, DocumentSection, OrderedEntry } from '../types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,7 +44,8 @@ export class Renderer {
 
     const lang = site.DefaultLocale || 'en';
     const docs = await this.siteLoader.getAllDocs(site);
-    const sections = await this.convertDocsToSections(docs, lang, site.DocsDir);
+    const entries = this.siteLoader.getOrderedEntries(site, docs);
+    const sections = await this.convertEntriesToSections(entries, lang, site.DocsDir);
     await this.downloadRemoteImages();
     
     // Generate PlantUML diagrams
@@ -93,7 +94,8 @@ export class Renderer {
         }
       }
       
-      const sections = await this.convertDocsToSections(filteredDocs, lang, site.DocsDir);
+      const entries = this.siteLoader.getOrderedEntries(site, filteredDocs);
+      const sections = await this.convertEntriesToSections(entries, lang, site.DocsDir);
       await this.downloadRemoteImages();
 
       // Generate PlantUML diagrams
@@ -157,6 +159,11 @@ export class Renderer {
   }
 
   private async convertDocsToSections(docs: DocPage[], language: string = 'en', docsDir?: string): Promise<DocumentSection[]> {
+    const entries: OrderedEntry[] = docs.map((doc) => ({ Type: 'doc', Doc: doc, Level: 1 }));
+    return this.convertEntriesToSections(entries, language, docsDir);
+  }
+
+  private async convertEntriesToSections(entries: OrderedEntry[], language: string = 'en', docsDir?: string): Promise<DocumentSection[]> {
     const sections: DocumentSection[] = [];
 
     const docKey = (doc: DocPage): string => {
@@ -167,10 +174,22 @@ export class Renderer {
 
     // Registry of all docs in this build so cross-document links can be
     // resolved to internal references (or gracefully degrade to text)
-    const knownDocs = new Set<string>(docs.map(docKey).filter(Boolean));
+    const knownDocs = new Set<string>(
+      entries.filter((e) => e.Doc).map((e) => docKey(e.Doc!)).filter(Boolean)
+    );
     this.mdxParser.setOptions({ language, knownDocs, enableMath: this.enableMath });
 
-    for (const doc of docs) {
+    for (const entry of entries) {
+      if (entry.Type === 'category') {
+        sections.push({
+          Title: entry.Label || '',
+          Content: '',
+          Level: entry.Level,
+        });
+        continue;
+      }
+
+      const doc = entry.Doc!;
       try {
         const content = await fs.readFile(doc.Path, 'utf-8');
         let docDir = '';
@@ -179,7 +198,7 @@ export class Renderer {
           docDir = rel.startsWith('..') ? '' : rel;
         }
         const labelKey = docKey(doc);
-        const parsed = await this.mdxParser.parse(content, docDir, labelKey);
+        const parsed = await this.mdxParser.parse(content, docDir, labelKey, entry.Level - 1);
         for (const remote of parsed.RemoteImages || []) {
           this.pendingRemoteImages.set(remote.url, remote.filename);
         }
@@ -191,7 +210,7 @@ export class Renderer {
         sections.push({
           Title: parsed.Title,
           Content: parsed.Content,
-          Level: 1,
+          Level: entry.Level,
           LabelKey: labelKey || undefined,
           PlantUMLDiagrams: plantumlDiagrams.length > 0 ? plantumlDiagrams : undefined,
           MermaidDiagrams: mermaidDiagrams.length > 0 ? mermaidDiagrams : undefined,
@@ -201,7 +220,7 @@ export class Renderer {
         sections.push({
           Title: doc.Title,
           Content: doc.Content,
-          Level: 1,
+          Level: entry.Level,
         });
       }
     }

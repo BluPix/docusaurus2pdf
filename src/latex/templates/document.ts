@@ -74,9 +74,10 @@ export function generateDocument(
   return lines.join('\n');
 }
 
+const SECTION_LADDER = ['\\section', '\\subsection', '\\subsubsection', '\\paragraph', '\\subparagraph'];
+
 function formatSection(section: DocumentSection): string {
-  const cmd = section.Level === 1 ? '\\section' :
-              section.Level === 2 ? '\\subsection' : '\\subsubsection';
+  const cmd = SECTION_LADDER[Math.min(Math.max(section.Level - 1, 0), SECTION_LADDER.length - 1)];
   const label = section.LabelKey ? `\\label{doc:${section.LabelKey}}` : '';
   return `${cmd}{${escapeString(section.Title)}}${label}\n${section.Content}`;
 }

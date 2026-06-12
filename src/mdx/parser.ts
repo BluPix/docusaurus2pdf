@@ -29,9 +29,12 @@ export class MDXParser {
     footnoteDefs: new Map(),
     definitions: new Map(),
   };
+  private static readonly SECTION_LADDER = ['section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'];
+
   private enableMath: boolean = true;
   private currentDocDir: string = '';
   private currentLabelPrefix: string = '';
+  private currentBaseLevel: number = 0;
   private knownDocs?: Set<string>;
   private remoteImages: Array<{ url: string; filename: string }> = [];
 
@@ -385,10 +388,13 @@ export class MDXParser {
    *               (POSIX style, e.g. "api/core"); used to resolve image paths
    * @param labelPrefix unique per-document prefix for LaTeX labels so that
    *               headings with the same text on different pages don't clash
+   * @param baseLevel 0-based sectioning index of the page title itself
+   *               (0 = \section); content headings nest below it
    */
-  async parse(source: string, docDir: string = '', labelPrefix: string = ''): Promise<ParsedPage> {
+  async parse(source: string, docDir: string = '', labelPrefix: string = '', baseLevel: number = 0): Promise<ParsedPage> {
     this.currentDocDir = docDir.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     this.currentLabelPrefix = labelPrefix ? `${labelPrefix}:` : '';
+    this.currentBaseLevel = Math.max(0, baseLevel);
     this.remoteImages = [];
     const { content, frontmatter } = this.extractFrontmatter(source);
     const processedContent = this.preprocessContent(content, frontmatter);
@@ -763,9 +769,12 @@ export class MDXParser {
 
         const slug = node.data?.d2pSlug;
 
-        let cmd = 'section';
-        if (hDepth === 2) cmd = 'subsection';
-        else if (hDepth >= 3) cmd = 'subsubsection';
+        // Content headings nest one level below the page title; h2 is the
+        // top content level in Docusaurus (h1 is the page title), and a
+        // stray in-body h1 maps to the same level as h2 instead of
+        // colliding with the page title's section level.
+        const idx = Math.min(this.currentBaseLevel + Math.max(1, hDepth - 1), MDXParser.SECTION_LADDER.length - 1);
+        const cmd = MDXParser.SECTION_LADDER[idx];
 
         if (slug) {
           return `\\${cmd}{${cleanedTitle}}\\label{${this.currentLabelPrefix}${slug}}`;

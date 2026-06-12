@@ -183,10 +183,12 @@ describe('MDXParser Comprehensive Tests', () => {
 
   // ==================== HEADINGS ====================
   describe('Headings', () => {
-    it('converts # to \\section', async () => {
+    it('maps an in-body # one level below the page title', async () => {
+      // The page title itself becomes the \section, so a stray in-body h1
+      // must not collide with it
       const input = '# Title\n\n# Main Title';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('\\section{Main Title}');
+      expect(result.Content).toContain('\\subsection{Main Title}');
     });
 
     it('converts ## to \\subsection', async () => {
