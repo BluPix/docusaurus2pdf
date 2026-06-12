@@ -9,6 +9,7 @@ export interface Site {
   Sidebars: Category[];
   Pages: DocPage[];
   Config?: SiteConfig;
+  DefaultLocale?: string;
 }
 
 export interface SiteConfig {
@@ -99,6 +100,8 @@ export interface MDXParserOptions {
   convertEmoji?: boolean;
   useEmojiCommands?: boolean;
   suppressCaptionNumbers?: boolean;
+  /** Document language; enables language-specific typography (vlna for cs/sk). */
+  language?: string;
 }
 
 // Renderer types

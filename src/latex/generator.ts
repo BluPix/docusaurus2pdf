@@ -1,7 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { applyVlna } from './vlna.js';
-import { SupportedLanguages, LatexGeneratorOptions, DocumentSection } from '../types/index.js';
+import { LatexGeneratorOptions, DocumentSection } from '../types/index.js';
 import { generatePreamble, PreambleOptions } from './preamble.js';
 import { generateDocument } from './templates/document.js';
 
@@ -22,16 +21,11 @@ export class LatexGenerator {
     };
     
     const preamble = generatePreamble(preambleOpts);
-    
-    // Apply vlna for Czech/Slovak
-    const lang = this.opts.Language || 'en';
-    const processedSections = sections.map((section) => ({
-      ...section,
-      Content: SupportedLanguages[lang]?.Vlna ? applyVlna(section.Content) : section.Content,
-    }));
-    
-    // Generate document
-    const content = generateDocument(preamble, this.opts, processedSections);
+
+    // Vlna (non-breaking spaces for cs/sk) is applied by the MDX parser on
+    // plain-text nodes only - never here on generated LaTeX, where it would
+    // corrupt code listings, URLs and math.
+    const content = generateDocument(preamble, this.opts, sections);
     
     await fs.mkdir(path.dirname(filename), { recursive: true });
     await fs.writeFile(filename, content, 'utf-8');

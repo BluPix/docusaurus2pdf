@@ -6,7 +6,8 @@ import remarkDirective from 'remark-directive';
 import remarkMdx from 'remark-mdx';
 import { visit } from 'unist-util-visit';
 import YAML from 'yaml';
-import { ParsedPage, MDXParserOptions } from '../types/index.js';
+import { ParsedPage, MDXParserOptions, SupportedLanguages } from '../types/index.js';
+import { applyVlna } from '../latex/vlna.js';
 
 export type { ParsedPage, MDXParserOptions } from '../types/index.js';
 
@@ -15,6 +16,7 @@ export class MDXParser {
   private convertEmoji: boolean = false;
   private useEmojiCommands: boolean = false;
   private suppressCaptionNumbers: boolean = false;
+  private useVlna: boolean = false;
 
   setOptions(opts: MDXParserOptions): void {
     if (opts.stripManualNumbering !== undefined) {
@@ -28,6 +30,9 @@ export class MDXParser {
     }
     if (opts.suppressCaptionNumbers !== undefined) {
       this.suppressCaptionNumbers = opts.suppressCaptionNumbers;
+    }
+    if (opts.language !== undefined) {
+      this.useVlna = SupportedLanguages[opts.language]?.Vlna ?? false;
     }
   }
 
@@ -936,6 +941,9 @@ export class MDXParser {
       escaped = this.convertEmojiToLatexCommand(escaped);
     } else if (this.convertEmoji) {
       escaped = this.convertEmojiToText(escaped);
+    }
+    if (this.useVlna) {
+      escaped = applyVlna(escaped);
     }
     return escaped;
   }

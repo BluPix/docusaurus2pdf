@@ -38,9 +38,10 @@ export class Renderer {
   async renderSingle(site: Site): Promise<void> {
     // Copy static assets first
     await this.copyStaticAssets(site);
-    
+
+    const lang = site.DefaultLocale || 'en';
     const docs = await this.siteLoader.getAllDocs(site);
-    const sections = await this.convertDocsToSections(docs);
+    const sections = await this.convertDocsToSections(docs, lang);
     
     // Generate PlantUML diagrams
     await this.generatePlantUMLDiagrams(sections);
@@ -54,10 +55,10 @@ export class Renderer {
     const generator = new LatexGenerator({
       Engine: this.opts.Engine,
       Title: projectTitle,
-      Language: 'en',
+      Language: lang,
       Date: '', // No date on title page
     });
-    
+
     await generator.generateDocument(texFile, sections);
     console.log(`Generated: ${texFile}`);
   }
@@ -87,8 +88,8 @@ export class Renderer {
         }
       }
       
-      const sections = await this.convertDocsToSections(filteredDocs);
-      
+      const sections = await this.convertDocsToSections(filteredDocs, lang);
+
       // Generate PlantUML diagrams
       await this.generatePlantUMLDiagrams(sections);
       
@@ -124,11 +125,12 @@ export class Renderer {
       console.log(`Warning: No matching sections found. Available: ${site.Sidebars.map(c => c.Label).join(', ')}`);
     }
     
+    const sectionLang = site.DefaultLocale || 'en';
     for (const category of filteredCategories) {
       const docs = await this.siteLoader.getDocsForCategory(site, category);
       if (docs.length === 0) continue;
-      
-      const sections = await this.convertDocsToSections(docs);
+
+      const sections = await this.convertDocsToSections(docs, sectionLang);
       
       const safeName = this.sanitizeFilename(category.Label);
       const texFile = path.join(this.opts.OutputDir, `${safeName}.tex`);
@@ -137,7 +139,7 @@ export class Renderer {
       const generator = new LatexGenerator({
         Engine: this.opts.Engine,
         Title: `${projectTitle} - ${category.Label}`,
-        Language: 'en',
+        Language: sectionLang,
         Date: '', // No date on title page
       });
       
@@ -146,9 +148,10 @@ export class Renderer {
     }
   }
 
-  private async convertDocsToSections(docs: DocPage[]): Promise<DocumentSection[]> {
+  private async convertDocsToSections(docs: DocPage[], language: string = 'en'): Promise<DocumentSection[]> {
     const sections: DocumentSection[] = [];
-    
+    this.mdxParser.setOptions({ language });
+
     for (const doc of docs) {
       try {
         const content = await fs.readFile(doc.Path, 'utf-8');

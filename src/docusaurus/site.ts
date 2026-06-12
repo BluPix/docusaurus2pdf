@@ -21,6 +21,7 @@ export class SiteLoader {
       Sidebars: [],
       Pages: [],
       Config: siteConfig,
+      DefaultLocale: this.defaultLocale,
     };
 
     // Load sidebars if exists (try .json, then .ts, then .js)
