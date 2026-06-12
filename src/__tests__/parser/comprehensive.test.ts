@@ -16,7 +16,7 @@ describe('MDXParser Comprehensive Tests', () => {
     it('supports code title attribute', async () => {
       const input = '# Test\n\n```js title="/src/index.js"\nconst x = 1;\n```';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('caption=/src/index.js');
+      expect(result.Content).toContain('caption={/src/index.js}');
     });
 
     it('supports showLineNumbers', async () => {
@@ -28,7 +28,7 @@ describe('MDXParser Comprehensive Tests', () => {
     it('supports title and showLineNumbers together', async () => {
       const input = '# Test\n\n```js title="test.js" showLineNumbers\nconst x = 1;\n```';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('caption=test.js');
+      expect(result.Content).toContain('caption={test.js}');
       expect(result.Content).toContain('numbers=left');
     });
 
@@ -68,7 +68,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const input = '# Test\n\n:::warning\nSome content\n:::';
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\begin{tcolorbox}');
-      expect(result.Content).toContain('warning');
+      expect(result.Content).toContain('Warning');
     });
 
     it('supports :::warning[Title] syntax', async () => {
@@ -326,7 +326,10 @@ describe('MDXParser Comprehensive Tests', () => {
     it('supports line highlighting syntax', async () => {
       const input = '# Test\n\n```js {1-3,5}\nconst a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\n```';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('highlightlines=1-3,5');
+      // Line-highlight metadata has no listings equivalent; it must be
+      // dropped without breaking the compile (highlightlines is not a key)
+      expect(result.Content).not.toContain('highlightlines');
+      expect(result.Content).toContain('const a = 1;');
     });
   });
 

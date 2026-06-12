@@ -19,6 +19,7 @@ export class Renderer {
   private siteLoader: SiteLoader;
   private mdxParser: MDXParser;
   private pendingRemoteImages: Map<string, string> = new Map();
+  private enableMath: boolean = true;
 
   constructor(opts: RendererOptions) {
     this.opts = opts;
@@ -37,6 +38,7 @@ export class Renderer {
   }
 
   async renderSingle(site: Site): Promise<void> {
+    this.enableMath = site.UsesMath ?? true;
     // Copy static assets first
     await this.copyStaticAssets(site);
 
@@ -66,6 +68,7 @@ export class Renderer {
   }
 
   async renderPerLanguage(site: Site): Promise<void> {
+    this.enableMath = site.UsesMath ?? true;
     // Copy static assets first
     await this.copyStaticAssets(site);
     
@@ -115,6 +118,7 @@ export class Renderer {
   }
 
   async renderPerSection(site: Site): Promise<void> {
+    this.enableMath = site.UsesMath ?? true;
     // Copy static assets first
     await this.copyStaticAssets(site);
     
@@ -164,7 +168,7 @@ export class Renderer {
     // Registry of all docs in this build so cross-document links can be
     // resolved to internal references (or gracefully degrade to text)
     const knownDocs = new Set<string>(docs.map(docKey).filter(Boolean));
-    this.mdxParser.setOptions({ language, knownDocs });
+    this.mdxParser.setOptions({ language, knownDocs, enableMath: this.enableMath });
 
     for (const doc of docs) {
       try {

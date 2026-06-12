@@ -10,6 +10,8 @@ export interface Site {
   Pages: DocPage[];
   Config?: SiteConfig;
   DefaultLocale?: string;
+  /** True when the site config references remark-math/KaTeX. */
+  UsesMath?: boolean;
 }
 
 export interface SiteConfig {
@@ -110,6 +112,12 @@ export interface MDXParserOptions {
    * unresolvable links degrade to plain text instead of dead URLs.
    */
   knownDocs?: Set<string>;
+  /**
+   * Parse $...$/$$...$$ as math. Should mirror whether the Docusaurus site
+   * has remark-math/KaTeX configured; otherwise "$5 and $10" prose would be
+   * swallowed as a formula.
+   */
+  enableMath?: boolean;
 }
 
 // Renderer types

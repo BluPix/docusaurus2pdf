@@ -53,11 +53,35 @@ export function getCommonPackages(): PackageSet {
     packages: [
       '\\usepackage{geometry}',
       '\\geometry{margin=2.5cm}',
+      '\\usepackage{amsmath}', // \\text, align/gather, matrices (KaTeX parity)
+      '\\usepackage{xcolor}',
       '\\usepackage[hidelinks]{hyperref}', // Completely hide link borders and colors
       '\\usepackage{bookmark}', // Better PDF bookmarks
       '\\usepackage{microtype}', // Better typography and hyphenation
       '\\usepackage{csquotes}', // Czech quotes support
       '\\usepackage{listings}',
+      '% Global listings style: wrap long lines (with a return marker) so',
+      '% code never overflows the page; light frame and background',
+      '\\lstset{',
+      '  basicstyle=\\ttfamily\\footnotesize,',
+      '  breaklines=true,',
+      '  breakatwhitespace=false,',
+      '  postbreak=\\mbox{\\textcolor{gray}{$\\hookrightarrow$}\\space},',
+      '  columns=fullflexible,',
+      '  keepspaces=true,',
+      '  showstringspaces=false,',
+      '  tabsize=2,',
+      '  frame=single,',
+      '  rulecolor=\\color{black!20},',
+      '  backgroundcolor=\\color{black!4},',
+      '  numberstyle=\\tiny\\color{black!50},',
+      '  keywordstyle=\\bfseries,',
+      '  commentstyle=\\color{black!55}\\itshape,',
+      '  stringstyle=\\color{black!70},',
+      '  captionpos=b,',
+      '  aboveskip=1em,',
+      '  belowskip=1em,',
+      '}',
       '\\lstdefinelanguage{javascript}{',
       '  keywords={break, case, catch, continue, debugger, default, delete, do, else, false, finally, for, function, if, in, instanceof, new, null, return, switch, this, throw, true, try, typeof, var, void, while, with, let, const, class, export, import},',
       '  morecomment=[l]{//},',
@@ -74,7 +98,6 @@ export function getCommonPackages(): PackageSet {
       '}',
       '\\lstalias{js}{javascript}',
       '\\lstalias{ts}{typescript}',
-      '\\usepackage{xcolor}',
       '\\usepackage{tcolorbox}',
       '\\tcbuselibrary{skins,breakable}',
       '\\usepackage{graphicx}',

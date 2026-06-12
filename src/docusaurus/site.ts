@@ -14,7 +14,8 @@ export class SiteLoader {
     // Detect default locale and load config from docusaurus config
     this.defaultLocale = await this.detectDefaultLocale(absRoot);
     const siteConfig = await this.loadSiteConfig(absRoot);
-    
+    const usesMath = await this.detectMathSupport(absRoot);
+
     const site: Site = {
       Root: absRoot,
       DocsDir: path.join(absRoot, 'docs'),
@@ -22,6 +23,7 @@ export class SiteLoader {
       Pages: [],
       Config: siteConfig,
       DefaultLocale: this.defaultLocale,
+      UsesMath: usesMath,
     };
 
     // Load sidebars if exists (try .json, then .ts, then .js)
@@ -62,6 +64,24 @@ export class SiteLoader {
       }
     }
     return 'en';
+  }
+
+  /**
+   * Sites that configure remark-math/rehype-katex want $...$ parsed as math;
+   * for everyone else dollar signs are plain prose. Without a config file we
+   * default to math enabled (no way to know, and math markup in plain text
+   * is rare while genuine formulas are common in such standalone usage).
+   */
+  private async detectMathSupport(root: string): Promise<boolean> {
+    for (const name of ['docusaurus.config.ts', 'docusaurus.config.js', 'docusaurus.config.mjs']) {
+      try {
+        const content = await fs.readFile(path.join(root, name), 'utf-8');
+        return /remark-math|rehype-katex|katex/i.test(content);
+      } catch {
+        continue;
+      }
+    }
+    return true;
   }
 
   private async loadSiteConfig(root: string): Promise<SiteConfig | undefined> {

@@ -29,6 +29,7 @@ export class MDXParser {
     footnoteDefs: new Map(),
     definitions: new Map(),
   };
+  private enableMath: boolean = true;
   private currentDocDir: string = '';
   private currentLabelPrefix: string = '';
   private knownDocs?: Set<string>;
@@ -52,6 +53,9 @@ export class MDXParser {
     }
     if ('knownDocs' in opts) {
       this.knownDocs = opts.knownDocs;
+    }
+    if (opts.enableMath !== undefined) {
+      this.enableMath = opts.enableMath;
     }
   }
 
@@ -394,23 +398,20 @@ export class MDXParser {
     const plantumlDiagrams: Array<{ hash: string; code: string }> = [];
     const mermaidDiagrams: Array<{ hash: string; code: string }> = [];
 
+    // remark-math is enabled only when the site actually uses math
+    // (KaTeX); otherwise "$5 and $10" in prose would be eaten as a formula
+    const mathPlugins: any[] = this.enableMath ? [remarkMath] : [];
+
     let ast: any;
     try {
-      ast = remark()
-        .use(remarkFrontmatter)
-        .use(remarkGfm)
-        .use(remarkMath)
-        .use(remarkDirective)
-        .use(remarkMdx)
-        .parse(contentWithoutTitle);
+      let processor = remark().use(remarkFrontmatter).use(remarkGfm);
+      for (const plugin of mathPlugins) processor = processor.use(plugin);
+      ast = processor.use(remarkDirective).use(remarkMdx).parse(contentWithoutTitle);
     } catch (err) {
       console.warn('MDX parse warning, falling back to standard Markdown parser:', err);
-      ast = remark()
-        .use(remarkFrontmatter)
-        .use(remarkGfm)
-        .use(remarkMath)
-        .use(remarkDirective)
-        .parse(contentWithoutTitle);
+      let processor = remark().use(remarkFrontmatter).use(remarkGfm);
+      for (const plugin of mathPlugins) processor = processor.use(plugin);
+      ast = processor.use(remarkDirective).parse(contentWithoutTitle);
     }
 
     visit(ast, 'code', (node: any) => {
@@ -730,26 +731,14 @@ export class MDXParser {
           params.push(`language=${mappedLang}`);
         }
 
-        let chosenEscapeChar = '';
-        const candidates = ['`', '|', '!', '@', '~'];
-        for (const char of candidates) {
-          if (!cleanCode.includes(char)) {
-            chosenEscapeChar = char;
-            break;
-          }
-        }
-        if (chosenEscapeChar) {
-          params.push(`escapechar=${chosenEscapeChar}`);
-        }
-
         if (showLineNumbers) {
           params.push('numbers=left');
         }
-        if (highlightLines) {
-          params.push(`highlightlines=${highlightLines}`);
-        }
+        // Docusaurus line-highlight metadata ({1,3-5}) has no listings
+        // equivalent; the lines render unhighlighted rather than failing
+        // the compile with an unknown key.
         if (blockTitle) {
-          params.push(`caption=${blockTitle}`);
+          params.push(`caption={${this.escapeLatex(blockTitle)}}`);
         }
 
         cleanCode = cleanCode
@@ -761,7 +750,8 @@ export class MDXParser {
           .replace(/\{#\s*highlight-start[\s\S]*?\{#\s*highlight-end\s*\}/g, '');
 
         const paramsStr = params.length > 0 ? `[${params.join(',')}]` : '';
-        return `\\begin{lstlisting}${paramsStr}\n${cleanCode}\\end{lstlisting}`;
+        const codeBody = cleanCode.endsWith('\n') ? cleanCode : `${cleanCode}\n`;
+        return `\\begin{lstlisting}${paramsStr}\n${codeBody}\\end{lstlisting}`;
       }
 
       case 'heading': {
@@ -852,8 +842,18 @@ export class MDXParser {
       case 'footnoteDefinition':
         return '';
 
-      case 'math':
-        return `\n\\[${node.value.trim()}\\]\n`;
+      case 'math': {
+        const mathValue = (node.value || '').trim();
+        // Display environments must not be wrapped in \[...\]
+        if (/^\\begin\{(align|align\*|gather|gather\*|alignat|alignat\*|equation|equation\*|eqnarray|multline|multline\*)\}/.test(mathValue)) {
+          return `\n${mathValue}\n`;
+        }
+        // KaTeX allows line breaks in display math; plain \[...\] does not
+        if (mathValue.includes('\\\\') && !mathValue.includes('\\begin{')) {
+          return `\n\\begin{gather*}\n${mathValue}\n\\end{gather*}\n`;
+        }
+        return `\n\\[${mathValue}\\]\n`;
+      }
 
       case 'inlineMath':
         return `$${node.value.trim()}$`;
@@ -885,7 +885,10 @@ export class MDXParser {
       }
 
       case 'containerDirective': {
-        const directiveName = node.name;
+        // Docusaurus admonition aliases: caution -> warning; important -> info
+        const aliasMap: Record<string, string> = { caution: 'warning', important: 'info' };
+        const directiveName = aliasMap[node.name] || node.name;
+
         const colors: Record<string, string> = {
           tip: 'green',
           note: 'blue',
@@ -904,7 +907,8 @@ export class MDXParser {
         };
         const icon = icons[directiveName] || '\\faInfoCircle';
 
-        let titleText = directiveName;
+        // Default title: original name capitalized (as Docusaurus shows it)
+        let titleText = this.escapeLatex(node.name.charAt(0).toUpperCase() + node.name.slice(1));
         let contentChildren = node.children;
 
         if (node.children.length > 0 && node.children[0].data?.directiveLabel) {
@@ -912,11 +916,13 @@ export class MDXParser {
           contentChildren = node.children.slice(1);
         }
 
-        const titleWithIcon = `${icon} ${titleText}`;
+        // title must be brace-wrapped: commas or brackets in the text would
+        // otherwise be parsed as pgfkeys option separators
+        const titleWithIcon = `title={${icon}\\ ${titleText}}`;
 
         const boxOptions = depth > 0
-          ? `[colback=${color}!5!white,colframe=${color}!75!black,title=${titleWithIcon},sharp corners,nobeforeafter,boxrule=0.5pt]`
-          : `[colback=${color}!5!white,colframe=${color}!75!black,title=${titleWithIcon}]`;
+          ? `[breakable,colback=${color}!5!white,colframe=${color}!75!black,${titleWithIcon},sharp corners,nobeforeafter,boxrule=0.5pt]`
+          : `[breakable,colback=${color}!5!white,colframe=${color}!75!black,${titleWithIcon}]`;
 
         const body = compileChildren(contentChildren, node, depth + 1).join('\n\n');
         return `\\begin{tcolorbox}${boxOptions}\n${body}\n\\end{tcolorbox}`;
@@ -987,22 +993,35 @@ export class MDXParser {
         if (elName === 'details') {
           let summaryText = 'Details';
           let bodyChildren = node.children;
-          const summaryNode = node.children.find((c: any) => c.name === 'summary' || (c.type === 'mdxJsxFlowElement' && c.name === 'summary'));
+          // <summary> may be a direct child or wrapped in a paragraph
+          let summaryNode = node.children.find((c: any) => c.name === 'summary');
+          let summaryParent: any = null;
+          if (!summaryNode) {
+            for (const c of node.children) {
+              if (c.type === 'paragraph' && c.children) {
+                const inner = c.children.find((cc: any) => cc.name === 'summary');
+                if (inner) {
+                  summaryNode = inner;
+                  summaryParent = c;
+                  break;
+                }
+              }
+            }
+          }
           if (summaryNode) {
-            summaryText = getPlainText(summaryNode).trim();
-            bodyChildren = node.children.filter((c: any) => c !== summaryNode);
+            summaryText = this.escapeLatex(getPlainText(summaryNode).trim());
+            bodyChildren = node.children.filter((c: any) => c !== summaryNode && c !== summaryParent);
           }
           const body = compileChildren(bodyChildren, node, depth).join('\n\n');
-          return `\\begin{tcolorbox}[title=${summaryText}]\n${body}\n\\end{tcolorbox}`;
+          return `\\begin{tcolorbox}[breakable,title={${summaryText}}]\n${body}\n\\end{tcolorbox}`;
         }
         if (elName === 'Tabs') {
           return compileChildren(node.children, node, depth).join('\n\n');
         }
         if (elName === 'TabItem') {
-          const labelAttr = node.attributes?.find((a: any) => a.name === 'label');
-          const label = labelAttr ? labelAttr.value : '';
+          const label = this.getJsxAttr(node, 'label') || this.getJsxAttr(node, 'value') || '';
           const body = compileChildren(node.children, node, depth).join('\n\n');
-          return `\\textbf{${label}:} ${body}`;
+          return `\\textbf{${this.escapeLatex(String(label))}:} ${body}`;
         }
         if (elName === 'DocCardList') {
           const itemsAttr = node.attributes?.find((a: any) => a.name === 'items');
@@ -1014,7 +1033,7 @@ export class MDXParser {
               } else if (itemsAttr.value.value) {
                 items = JSON.parse(itemsAttr.value.value.replace(/'/g, '"'));
               }
-              return `\\begin{itemize}\n${items.map(item => `\\item ${item.label || ''}`).join('\n')}\n\\end{itemize}`;
+              return `\\begin{itemize}\n${items.map(item => `\\item ${this.escapeLatex(String(item.label || ''))}`).join('\n')}\n\\end{itemize}`;
             } catch {
               return '';
             }
@@ -1022,10 +1041,8 @@ export class MDXParser {
           return '';
         }
         if (elName === 'DocCard') {
-          const labelAttr = node.attributes?.find((a: any) => a.name === 'label');
-          const descAttr = node.attributes?.find((a: any) => a.name === 'description');
-          const label = labelAttr ? String(labelAttr.value) : '';
-          const description = descAttr ? String(descAttr.value) : '';
+          const label = this.escapeLatex(this.getJsxAttr(node, 'label') || '');
+          const description = this.escapeLatex(this.getJsxAttr(node, 'description') || '');
           return description ? `\\textbf{${label}} - ${description}` : `\\textbf{${label}}`;
         }
 
