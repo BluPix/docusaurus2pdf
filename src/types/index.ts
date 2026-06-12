@@ -93,6 +93,8 @@ export interface ParsedPage {
   Frontmatter: Record<string, unknown>;
   PlantUMLDiagrams: Array<{ hash: string; code: string }>;
   MermaidDiagrams: Array<{ hash: string; code: string }>;
+  /** Remote image URLs referenced by the page; the renderer downloads them. */
+  RemoteImages?: Array<{ url: string; filename: string }>;
 }
 
 export interface MDXParserOptions {

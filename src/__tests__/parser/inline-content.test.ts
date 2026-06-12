@@ -8,7 +8,7 @@ describe('Inline content must never be silently dropped', () => {
     const result = await parser.parse('Před obrázkem ![alt](./img/foo.png) a text po obrázku.');
     expect(result.Content).toContain('Před obrázkem');
     expect(result.Content).toContain('a text po obrázku');
-    expect(result.Content).toContain('\\d2pdfimage{img/foo.png}');
+    expect(result.Content).toContain('\\d2pdfimage{img/img__foo.png}');
     expect(result.Content).not.toContain('\\begin{figure}');
   });
 
@@ -38,7 +38,7 @@ describe('Inline content must never be silently dropped', () => {
 
   it('renders <img> JSX element with width', async () => {
     const result = await parser.parse('<img src="/img/screenshot.png" alt="Screenshot" width="400" />');
-    expect(result.Content).toContain('img/screenshot.png');
+    expect(result.Content).toContain('img/static__img__screenshot.png');
     expect(result.Content).toContain('width=300.0pt');
   });
 

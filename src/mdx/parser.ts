@@ -28,6 +28,8 @@ export class MDXParser {
     footnoteDefs: new Map(),
     definitions: new Map(),
   };
+  private currentDocDir: string = '';
+  private remoteImages: Array<{ url: string; filename: string }> = [];
 
   setOptions(opts: MDXParserOptions): void {
     if (opts.stripManualNumbering !== undefined) {
@@ -171,13 +173,54 @@ export class MDXParser {
 
   /**
    * Map an image URL to the flat img/ directory used in the LaTeX output.
-   * SVGs are converted to PDF by the renderer, GIF/WebP to PNG.
+   * The mapping must stay in sync with Renderer.copyStaticAssets:
+   * - relative URLs are resolved against the doc's directory and flattened
+   *   with "__" (collision-free, unlike plain basenames)
+   * - "/..." and "@site/..." resolve against the static/ dir or site root
+   * - remote URLs get a hash-based name; the renderer downloads them
+   * - SVG -> PDF, GIF/WebP/AVIF -> PNG (the renderer converts)
    */
   private imageUrlToLatexPath(url: string): string {
-    const filename = url.replace(/^.*[\\/]/, '').split(/[?#]/)[0];
-    return `img/${filename
-      .replace(/\.svg$/i, '.pdf')
-      .replace(/\.(gif|webp|avif)$/i, '.png')}`;
+    const clean = url.split(/[?#]/)[0];
+
+    if (/^https?:\/\//i.test(clean)) {
+      const extMatch = clean.match(/\.[a-z0-9]+$/i);
+      const ext = extMatch ? extMatch[0].toLowerCase() : '.png';
+      const finalName = MDXParser.rewriteImageExt(`remote_${this.simpleHash(url)}${ext}`);
+      if (!this.remoteImages.some((r) => r.url === url)) {
+        this.remoteImages.push({ url, filename: finalName });
+      }
+      return `img/${finalName}`;
+    }
+
+    return `img/${MDXParser.flattenImagePath(clean, this.currentDocDir)}`;
+  }
+
+  static rewriteImageExt(name: string): string {
+    return name.replace(/\.svg$/i, '.pdf').replace(/\.(gif|webp|avif)$/i, '.png');
+  }
+
+  /** Flatten a doc-relative or site-absolute image path to a unique filename. */
+  static flattenImagePath(urlPath: string, docDir: string): string {
+    let joined: string;
+    if (urlPath.startsWith('@site/')) {
+      joined = urlPath.slice('@site/'.length);
+    } else if (urlPath.startsWith('/')) {
+      joined = `static${urlPath}`;
+    } else {
+      joined = docDir ? `${docDir}/${urlPath}` : urlPath;
+    }
+
+    const parts: string[] = [];
+    for (const p of joined.replace(/\\/g, '/').split('/')) {
+      if (!p || p === '.') continue;
+      if (p === '..') {
+        parts.pop();
+        continue;
+      }
+      parts.push(p);
+    }
+    return MDXParser.rewriteImageExt(parts.join('__'));
   }
 
   /**
@@ -203,7 +246,13 @@ export class MDXParser {
     return `\\d2pdfimage{${texPath}}`;
   }
 
-  async parse(source: string): Promise<ParsedPage> {
+  /**
+   * @param docDir directory of the document relative to the docs root
+   *               (POSIX style, e.g. "api/core"); used to resolve image paths
+   */
+  async parse(source: string, docDir: string = ''): Promise<ParsedPage> {
+    this.currentDocDir = docDir.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    this.remoteImages = [];
     const { content, frontmatter } = this.extractFrontmatter(source);
     const processedContent = this.preprocessContent(content, frontmatter);
     const contentWithoutTitle = this.removeFirstHeading(processedContent);
@@ -279,6 +328,7 @@ export class MDXParser {
       Frontmatter: frontmatter,
       PlantUMLDiagrams: plantumlDiagrams,
       MermaidDiagrams: mermaidDiagrams,
+      RemoteImages: this.remoteImages,
     };
   }
 

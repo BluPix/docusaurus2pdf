@@ -18,6 +18,7 @@ export class Renderer {
   private opts: RendererOptions;
   private siteLoader: SiteLoader;
   private mdxParser: MDXParser;
+  private pendingRemoteImages: Map<string, string> = new Map();
 
   constructor(opts: RendererOptions) {
     this.opts = opts;
@@ -41,7 +42,8 @@ export class Renderer {
 
     const lang = site.DefaultLocale || 'en';
     const docs = await this.siteLoader.getAllDocs(site);
-    const sections = await this.convertDocsToSections(docs, lang);
+    const sections = await this.convertDocsToSections(docs, lang, site.DocsDir);
+    await this.downloadRemoteImages();
     
     // Generate PlantUML diagrams
     await this.generatePlantUMLDiagrams(sections);
@@ -88,7 +90,8 @@ export class Renderer {
         }
       }
       
-      const sections = await this.convertDocsToSections(filteredDocs, lang);
+      const sections = await this.convertDocsToSections(filteredDocs, lang, site.DocsDir);
+      await this.downloadRemoteImages();
 
       // Generate PlantUML diagrams
       await this.generatePlantUMLDiagrams(sections);
@@ -130,7 +133,8 @@ export class Renderer {
       const docs = await this.siteLoader.getDocsForCategory(site, category);
       if (docs.length === 0) continue;
 
-      const sections = await this.convertDocsToSections(docs, sectionLang);
+      const sections = await this.convertDocsToSections(docs, sectionLang, site.DocsDir);
+      await this.downloadRemoteImages();
       
       const safeName = this.sanitizeFilename(category.Label);
       const texFile = path.join(this.opts.OutputDir, `${safeName}.tex`);
@@ -148,15 +152,23 @@ export class Renderer {
     }
   }
 
-  private async convertDocsToSections(docs: DocPage[], language: string = 'en'): Promise<DocumentSection[]> {
+  private async convertDocsToSections(docs: DocPage[], language: string = 'en', docsDir?: string): Promise<DocumentSection[]> {
     const sections: DocumentSection[] = [];
     this.mdxParser.setOptions({ language });
 
     for (const doc of docs) {
       try {
         const content = await fs.readFile(doc.Path, 'utf-8');
-        const parsed = await this.mdxParser.parse(content);
-        
+        let docDir = '';
+        if (docsDir) {
+          const rel = path.relative(docsDir, path.dirname(doc.Path)).split(path.sep).join('/');
+          docDir = rel.startsWith('..') ? '' : rel;
+        }
+        const parsed = await this.mdxParser.parse(content, docDir);
+        for (const remote of parsed.RemoteImages || []) {
+          this.pendingRemoteImages.set(remote.url, remote.filename);
+        }
+
         // Use PlantUML diagrams extracted by the parser
         const plantumlDiagrams = parsed.PlantUMLDiagrams || [];
         const mermaidDiagrams = parsed.MermaidDiagrams || [];
@@ -189,86 +201,121 @@ export class Renderer {
   }
 
   async copyStaticAssets(site: Site): Promise<void> {
-    const docsDir = site.DocsDir;
-    
-    // Asset types and their target subdirectories
+    // Images referenced from docs are flattened into img/ using the same
+    // path mapping as the MDX parser (MDXParser.flattenImagePath), so names
+    // are unique and references always match the copied files.
+    await this.copyImageTree(site.DocsDir, '');
+    await this.copyImageTree(path.join(site.Root, 'static'), 'static');
+
+    // Fonts and data files keep their original basenames
     const assetTypes = [
-      { exts: ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.eps'], subdir: 'img', desc: 'image' },
       { exts: ['.ttf', '.otf', '.woff', '.woff2'], subdir: 'fonts', desc: 'font' },
       { exts: ['.json', '.yaml', '.yml', '.csv', '.xml'], subdir: 'data', desc: 'data file' },
     ];
-    
+
     try {
-      const allFiles = await fs.readdir(docsDir, { recursive: true });
-      
-      // Group files by type
-      const filesByType = new Map<string, string[]>();
+      const allFiles = await fs.readdir(site.DocsDir, { recursive: true });
+
       for (const file of allFiles) {
         const ext = path.extname(file).toLowerCase();
-        for (const type of assetTypes) {
-          if (type.exts.includes(ext)) {
-            if (!filesByType.has(type.subdir)) {
-              filesByType.set(type.subdir, []);
-            }
-            filesByType.get(type.subdir)!.push(file);
-            break;
-          }
-        }
+        const type = assetTypes.find(t => t.exts.includes(ext));
+        if (!type) continue;
+
+        const targetDir = path.join(this.opts.OutputDir, type.subdir);
+        await fs.mkdir(targetDir, { recursive: true });
+        const destPath = path.join(targetDir, path.basename(String(file)));
+        await fs.copyFile(path.join(site.DocsDir, String(file)), destPath);
+        console.log(`Copied ${type.desc}: ${type.subdir}/${path.basename(String(file))}`);
       }
-      
-      // Copy each type of asset
-      for (const [subdir, files] of filesByType) {
-        const targetDir = path.join(this.opts.OutputDir, subdir);
-        const typeInfo = assetTypes.find(t => t.subdir === subdir)!;
-        
-        // Track used filenames to avoid collisions
-        const usedNames = new Set<string>();
-        
-        for (const filePath of files) {
-          const srcPath = path.join(docsDir, filePath);
-          const originalName = path.basename(filePath);
-          
-          // Generate unique filename if collision exists
-          let filename = originalName;
-          let counter = 1;
-          while (usedNames.has(filename)) {
-            const ext = path.extname(originalName);
-            const base = path.basename(originalName, ext);
-            filename = `${base}_${counter}${ext}`;
-            counter++;
-          }
-          usedNames.add(filename);
-          
-          const destPath = path.join(targetDir, filename);
-          await fs.mkdir(targetDir, { recursive: true });
-          await fs.copyFile(srcPath, destPath);
-          console.log(`Copied ${typeInfo.desc}: ${subdir}/${filename}`);
-        }
-      }
-      
-      // Handle SVG files separately - convert to PDF
-      const svgFiles = allFiles.filter(f => path.extname(f).toLowerCase() === '.svg');
-      if (svgFiles.length > 0) {
-        const imgDir = path.join(this.opts.OutputDir, 'img');
-        await fs.mkdir(imgDir, { recursive: true });
-        
-        for (const svgPath of svgFiles) {
-          const srcPath = path.join(docsDir, svgPath);
-          const baseName = path.basename(svgPath, '.svg');
-          const pdfName = `${baseName}.pdf`;
-          const destPath = path.join(imgDir, pdfName);
-          
-          try {
-            await this.convertSvgToPdfWithPuppeteer(srcPath, destPath);
-            console.log(`Converted SVG to PDF: img/${pdfName}`);
-          } catch (err) {
-            console.error(`Failed to convert SVG ${svgPath}:`, err);
-          }
-        }
-      }
-    } catch (err) {
+    } catch {
       // No assets or error reading directory - ignore
     }
+  }
+
+  private static readonly IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.pdf', '.eps', '.svg', '.gif', '.webp', '.avif'];
+
+  /**
+   * Copy all images under rootDir into the flat img/ output directory.
+   * prefix is '' for the docs tree and 'static' for the static/ tree.
+   */
+  private async copyImageTree(rootDir: string, prefix: string): Promise<void> {
+    let allFiles: string[];
+    try {
+      allFiles = (await fs.readdir(rootDir, { recursive: true })).map(String);
+    } catch {
+      return;
+    }
+
+    const imgDir = path.join(this.opts.OutputDir, 'img');
+
+    for (const file of allFiles) {
+      const ext = path.extname(file).toLowerCase();
+      if (!Renderer.IMAGE_EXTS.includes(ext)) continue;
+
+      const relPosix = file.split(path.sep).join('/');
+      const flatName = prefix
+        ? MDXParser.flattenImagePath(`/${relPosix}`, '') // leading '/' maps to static/
+        : MDXParser.flattenImagePath(relPosix, '');
+      const srcPath = path.join(rootDir, file);
+      const destPath = path.join(imgDir, flatName);
+      await fs.mkdir(imgDir, { recursive: true });
+
+      try {
+        if (ext === '.svg') {
+          await this.convertSvgToPdfWithPuppeteer(srcPath, destPath);
+          console.log(`Converted SVG to PDF: img/${flatName}`);
+        } else if (ext === '.gif' || ext === '.webp' || ext === '.avif') {
+          await this.convertImageToPngWithPuppeteer(srcPath, destPath);
+          console.log(`Converted ${ext.slice(1).toUpperCase()} to PNG: img/${flatName}`);
+        } else {
+          await fs.copyFile(srcPath, destPath);
+          console.log(`Copied image: img/${flatName}`);
+        }
+      } catch (err) {
+        console.error(`Failed to process image ${relPosix}:`, err);
+      }
+    }
+  }
+
+  /** Download remote images collected by the parser into img/. */
+  private async downloadRemoteImages(): Promise<void> {
+    if (this.pendingRemoteImages.size === 0) return;
+
+    const imgDir = path.join(this.opts.OutputDir, 'img');
+    await fs.mkdir(imgDir, { recursive: true });
+
+    for (const [url, filename] of this.pendingRemoteImages) {
+      const destPath = path.join(imgDir, filename);
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.warn(`Failed to download image ${url}: HTTP ${response.status}`);
+          continue;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const srcExt = (url.split(/[?#]/)[0].match(/\.[a-z0-9]+$/i)?.[0] || '').toLowerCase();
+
+        if (srcExt === '.svg' || srcExt === '.gif' || srcExt === '.webp' || srcExt === '.avif') {
+          const tempPath = path.join(imgDir, `download_temp${srcExt}`);
+          await fs.writeFile(tempPath, buffer);
+          try {
+            if (srcExt === '.svg') {
+              await this.convertSvgToPdfWithPuppeteer(tempPath, destPath);
+            } else {
+              await this.convertImageToPngWithPuppeteer(tempPath, destPath);
+            }
+          } finally {
+            await fs.unlink(tempPath).catch(() => {});
+          }
+        } else {
+          await fs.writeFile(destPath, buffer);
+        }
+        console.log(`Downloaded image: img/${filename}`);
+      } catch (err) {
+        console.warn(`Failed to download image ${url}:`, err);
+      }
+    }
+    this.pendingRemoteImages.clear();
   }
 
   // Backward compatibility alias
@@ -672,28 +719,7 @@ skinparam packageFontName Serif
   }
 
   private async generateMermaidWithPuppeteer(hash: string, code: string, outputPath: string): Promise<void> {
-    // Find system Chrome/Chromium
-    const { execSync } = await import('child_process');
-    let chromePath = '';
-    const possibleChromePaths = [
-      '/usr/bin/chromium',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/google-chrome',
-      '/usr/bin/chrome',
-      '/usr/local/bin/chromium',
-      '/opt/google/chrome/chrome',
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    ];
-    for (const p of possibleChromePaths) {
-      try {
-        execSync(`test -f "${p}"`, { stdio: 'ignore' });
-        chromePath = p;
-        console.log('Found Chrome at:', p);
-        break;
-      } catch {
-        continue;
-      }
-    }
+    const chromePath = await this.findSystemChrome();
 
     // Use puppeteer to render Mermaid directly in browser
     const puppeteer = await import('puppeteer');
@@ -772,10 +798,45 @@ ${code.trim()}
     }
   }
 
-  private async convertSvgToPdfWithPuppeteer(svgPath: string, outputPath: string): Promise<void> {
-    // Find system Chrome/Chromium
+  /**
+   * Convert a raster image (GIF/WebP/AVIF) to PNG locally via headless
+   * Chrome - no online service involved. Vector sources (SVG) go through
+   * convertSvgToPdfWithPuppeteer instead so they stay vector.
+   */
+  private async convertImageToPngWithPuppeteer(srcPath: string, outputPath: string): Promise<void> {
+    const puppeteer = await import('puppeteer');
+    const browser = await puppeteer.launch({
+      headless: true,
+      executablePath: (await this.findSystemChrome()) || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+
+    try {
+      const page = await browser.newPage();
+      const fileUrl = `file://${path.resolve(srcPath)}`;
+      await page.setContent(`
+        <!DOCTYPE html>
+        <html><body style="margin:0;padding:0;">
+          <img src="${fileUrl}" style="display:block;">
+        </body></html>
+      `, { waitUntil: 'networkidle0' });
+
+      const dimensions = await page.evaluate(() => {
+        const img = document.querySelector('img');
+        return { width: img?.naturalWidth || 800, height: img?.naturalHeight || 600 };
+      });
+      await page.setViewport({ width: Math.max(1, dimensions.width), height: Math.max(1, dimensions.height) });
+
+      const img = await page.$('img');
+      if (!img) throw new Error('Image failed to load');
+      await img.screenshot({ path: outputPath as `${string}.png`, omitBackground: true });
+    } finally {
+      await browser.close();
+    }
+  }
+
+  private async findSystemChrome(): Promise<string> {
     const { execSync } = await import('child_process');
-    let chromePath = '';
     const possibleChromePaths = [
       '/usr/bin/chromium',
       '/usr/bin/chromium-browser',
@@ -788,12 +849,16 @@ ${code.trim()}
     for (const p of possibleChromePaths) {
       try {
         execSync(`test -f "${p}"`, { stdio: 'ignore' });
-        chromePath = p;
-        break;
+        return p;
       } catch {
         continue;
       }
     }
+    return '';
+  }
+
+  private async convertSvgToPdfWithPuppeteer(svgPath: string, outputPath: string): Promise<void> {
+    const chromePath = await this.findSystemChrome();
 
     const svgContent = await fs.readFile(svgPath, 'utf-8');
 

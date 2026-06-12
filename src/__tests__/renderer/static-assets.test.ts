@@ -50,7 +50,7 @@ describe('Renderer Static Assets', () => {
     const imgDir = path.join(outputDir, 'img');
     const files = await fs.readdir(imgDir);
     expect(files).toContain('image1.png');
-    expect(files).toContain('image2.jpg');
+    expect(files).toContain('subdir__image2.jpg');
   });
 
   it('copies font files to fonts/ subdirectory', async () => {
@@ -83,8 +83,7 @@ describe('Renderer Static Assets', () => {
     expect(files).toContain('table.csv');
   });
 
-  it('handles filename collisions by appending counter', async () => {
-    // Create subdirectories with same filename
+  it('keeps same-named images from different directories distinct', async () => {
     await fs.mkdir(path.join(docsDir, 'dir1'), { recursive: true });
     await fs.mkdir(path.join(docsDir, 'dir2'), { recursive: true });
     await fs.writeFile(path.join(docsDir, 'dir1', 'image.png'), 'fake data 1');
@@ -92,11 +91,23 @@ describe('Renderer Static Assets', () => {
     
     await (renderer as any).copyStaticAssets(site);
     
-    // Check both files exist with unique names
+    // Flattened names match what the parser generates for each reference
     const imgDir = path.join(outputDir, 'img');
     const files = await fs.readdir(imgDir);
-    expect(files).toContain('image.png');
-    expect(files).toContain('image_1.png');
+    expect(files).toContain('dir1__image.png');
+    expect(files).toContain('dir2__image.png');
+  });
+
+  it('copies images from the static/ directory with static__ prefix', async () => {
+    const staticImgDir = path.join(tempDir, 'static', 'img');
+    await fs.mkdir(staticImgDir, { recursive: true });
+    await fs.writeFile(path.join(staticImgDir, 'logo.png'), 'fake logo');
+
+    await (renderer as any).copyStaticAssets(site);
+
+    const imgDir = path.join(outputDir, 'img');
+    const files = await fs.readdir(imgDir);
+    expect(files).toContain('static__img__logo.png');
   });
 
   it('ignores non-asset files', async () => {
