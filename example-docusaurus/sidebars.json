@@ -1,0 +1,52 @@
+{
+  "tutorialSidebar": [
+    "intro",
+    {
+      "type": "category",
+      "label": "Getting Started",
+      "items": [
+        "getting-started/installation",
+        "getting-started/configuration",
+        "getting-started/first-steps"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Advanced Topics",
+      "items": [
+        "advanced/customization",
+        "advanced/deployment"
+      ]
+    }
+  ],
+  "apiSidebar": [
+    "api/overview",
+    {
+      "type": "category",
+      "label": "Core API",
+      "items": [
+        "api/core/authentication",
+        "api/core/endpoints",
+        "api/core/errors"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Webhooks",
+      "items": [
+        "api/webhooks/setup",
+        "api/webhooks/events"
+      ]
+    }
+  ],
+  "csTutorialSidebar": [
+    "i18n/cs/docusaurus-plugin-content-docs/current/intro",
+    {
+      "type": "category",
+      "label": "Začínáme",
+      "items": [
+        "i18n/cs/docusaurus-plugin-content-docs/current/instalace"
+      ]
+    }
+  ]
+}

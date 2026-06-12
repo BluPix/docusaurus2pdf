@@ -1,0 +1,93 @@
+{
+  "name": "docusaurus2pdf",
+  "version": "0.0.0",
+  "description": "Convert Docusaurus docs to PDF with full MDX support",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "docusaurus2pdf": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*",
+    "!dist/**/__tests__/**",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "vendor/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/cli.js",
+      "require": "./dist/cli.js",
+      "types": "./dist/cli.d.ts"
+    },
+    "./plugin": {
+      "import": "./dist/plugin/index.js",
+      "require": "./dist/plugin/index.js",
+      "types": "./dist/plugin/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "postinstall": "npx puppeteer browsers install chrome-headless-shell || true; node -e \"const fs=require('fs');const p='vendor/plantuml.jar';try{const s=fs.statSync(p).size;if(s<1000){console.log('Downloading PlantUML JAR (~8MB)...');require('child_process').execSync('curl -L -o '+p+' https://github.com/plantuml/plantuml/releases/download/v1.2024.0/plantuml-1.2024.0.jar',{stdio:'inherit'});console.log('PlantUML JAR downloaded');}}catch(e){console.log('Downloading PlantUML JAR...');require('child_process').execSync('curl -L -o '+p+' https://github.com/plantuml/plantuml/releases/download/v1.2024.0/plantuml-1.2024.0.jar',{stdio:'inherit'});console.log('PlantUML JAR downloaded');}\"",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "docusaurus",
+    "pdf",
+    "mdx",
+    "latex",
+    "plugin"
+  ],
+  "author": "Docusaurus2PDF Contributors",
+  "license": "MIT",
+  "peerDependencies": {
+    "@docusaurus/types": ">=3.0.0"
+  },
+  "dependencies": {
+    "@mdx-js/mdx": "^3.1.1",
+    "@mermaid-js/mermaid-cli": "^11.12.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "dompurify": "^3.4.1",
+    "glob": "^13.0.6",
+    "isomorphic-dompurify": "^2.23.0",
+    "jsdom": "^29.0.2",
+    "mermaid": "^11.14.0",
+    "pako": "^2.1.0",
+    "puppeteer": "^23.0.0",
+    "remark": "^15.0.1",
+    "remark-directive": "^4.0.0",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-mdx": "^3.1.1",
+    "svg2pdf.js": "^2.7.0",
+    "unist-util-visit": "^5.1.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@docusaurus/types": "^3.0.0",
+    "@types/jsdom": "^28.0.1",
+    "@types/node": "^22.0.0",
+    "@types/pako": "^2.0.4",
+    "@vitest/coverage-v8": "^4.1.5",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.5"
+  }
+}

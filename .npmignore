@@ -1,0 +1,21 @@
+# Tests
+__tests__/
+*.test.js
+*.test.d.ts
+*.test.d.ts.map
+
+# Source maps
+*.map
+
+# Coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
