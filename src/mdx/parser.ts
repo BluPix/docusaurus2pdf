@@ -11,12 +11,23 @@ import { applyVlna } from '../latex/vlna.js';
 
 export type { ParsedPage, MDXParserOptions } from '../types/index.js';
 
+interface ParseContext {
+  headingLabels: Map<string, string>;
+  footnoteDefs: Map<string, string>;
+  definitions: Map<string, { url: string; title?: string }>;
+}
+
 export class MDXParser {
   private stripManualNumbering: boolean = false;
   private convertEmoji: boolean = false;
   private useEmojiCommands: boolean = false;
   private suppressCaptionNumbers: boolean = false;
   private useVlna: boolean = false;
+  private ctx: ParseContext = {
+    headingLabels: new Map(),
+    footnoteDefs: new Map(),
+    definitions: new Map(),
+  };
 
   setOptions(opts: MDXParserOptions): void {
     if (opts.stripManualNumbering !== undefined) {
@@ -136,16 +147,60 @@ export class MDXParser {
     return result;
   }
 
-  private buildIncludeGraphics(filename: string, size?: string): string {
-    const pdfFilename = filename.replace(/\.svg$/i, '.pdf');
+  private getJsxAttr(node: any, name: string): string | undefined {
+    const attr = node.attributes?.find((a: any) => a.name === name);
+    if (!attr) return undefined;
+    if (typeof attr.value === 'string') return attr.value;
+    if (attr.value && typeof attr.value.value === 'string') return attr.value.value;
+    return undefined;
+  }
+
+  private buildHref(url: string, text: string): string {
+    if (url.startsWith('#')) {
+      const headingText = url.substring(1);
+      const label = this.ctx.headingLabels.get(decodeURIComponent(headingText)) || this.ctx.headingLabels.get(headingText) || headingText;
+      return `\\hyperref[${label}]{${text}}`;
+    }
+    const escapedUrl = url
+      .replace(/%/g, '\\%')
+      .replace(/#/g, '\\#')
+      .replace(/_/g, '\\_')
+      .replace(/&/g, '\\&');
+    return `\\href{${escapedUrl}}{${text}}`;
+  }
+
+  /**
+   * Map an image URL to the flat img/ directory used in the LaTeX output.
+   * SVGs are converted to PDF by the renderer, GIF/WebP to PNG.
+   */
+  private imageUrlToLatexPath(url: string): string {
+    const filename = url.replace(/^.*[\\/]/, '').split(/[?#]/)[0];
+    return `img/${filename
+      .replace(/\.svg$/i, '.pdf')
+      .replace(/\.(gif|webp|avif)$/i, '.png')}`;
+  }
+
+  /**
+   * Emit graphics inclusion wrapped in \d2pdfimage (defined in the preamble),
+   * which caps size at the text block while keeping small images at natural
+   * size, and typesets a visible placeholder when the file is missing.
+   */
+  private buildIncludeGraphics(url: string, size?: string): string {
+    const texPath = this.imageUrlToLatexPath(url);
     if (size) {
-      const widthMatch = size.match(/width=(\d+)%/);
+      const widthMatch = size.match(/width=(\d+)\s*%/);
       if (widthMatch) {
         const percent = parseInt(widthMatch[1], 10) / 100;
-        return `\\includegraphics[width=${percent}\\textwidth,keepaspectratio]{img/${pdfFilename}}`;
+        return `\\d2pdfimage[width=${percent}\\textwidth]{${texPath}}`;
+      }
+      const pxMatch = size.match(/width=(\d+)(px)?\s*$/);
+      if (pxMatch) {
+        // CSS px -> pt (96dpi -> 72.27pt/in); px is not a XeTeX unit
+        const pt = (parseInt(pxMatch[1], 10) * 0.75).toFixed(1);
+        return `\\d2pdfimage[width=${pt}pt]{${texPath}}`;
       }
     }
-    return `\\includegraphics[width=0.95\\textwidth,height=0.5\\textheight,keepaspectratio]{img/${pdfFilename}}`;
+    return `\\d2pdfimage{${texPath}}`;
   }
 
   async parse(source: string): Promise<ParsedPage> {
@@ -194,7 +249,7 @@ export class MDXParser {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
-      
+
       const count = usedLabels.get(label) || 0;
       if (count > 0) {
         label = `${label}-${count}`;
@@ -203,17 +258,20 @@ export class MDXParser {
       headingLabels.set(rawText, label);
     });
 
-    const footnoteDefinitionsMap = new Map<string, string>();
-    // Need to define compileNode / compileChildren context before visiting
-    const localCompileNode = (node: any, parent: any, depth: number): string => 
-      this.compileNode(node, parent, depth, headingLabels, footnoteDefinitionsMap);
-
-    visit(ast, 'footnoteDefinition', (node: any) => {
-      const compiled = node.children.map((c: any) => localCompileNode(c, node, 0)).join('\n\n').trim();
-      footnoteDefinitionsMap.set(node.identifier, compiled);
+    // Reference-style link/image definitions ([ref]: https://...)
+    const definitions = new Map<string, { url: string; title?: string }>();
+    visit(ast, 'definition', (node: any) => {
+      definitions.set(node.identifier, { url: node.url || '', title: node.title || undefined });
     });
 
-    const latexContent = this.compileNode(ast, null, 0, headingLabels, footnoteDefinitionsMap);
+    this.ctx = { headingLabels, footnoteDefs: new Map(), definitions };
+
+    visit(ast, 'footnoteDefinition', (node: any) => {
+      const compiled = node.children.map((c: any) => this.compileNode(c, node, 0)).join('\n\n').trim();
+      this.ctx.footnoteDefs.set(node.identifier, compiled);
+    });
+
+    const latexContent = this.compileNode(ast, null, 0);
 
     return {
       Title: title,
@@ -381,12 +439,12 @@ export class MDXParser {
     return processed.join('\n');
   }
 
-  private compileNode(node: any, parent: any, depth: number, headingLabels: Map<string, string>, footnoteDefinitionsMap: Map<string, string>): string {
+  private compileNode(node: any, parent: any, depth: number): string {
     if (!node) return '';
 
     const getPlainText = (n: any): string => this.getPlainText(n);
-    const compileChildren = (children: any[], parentNode: any, currentDepth: number): string[] => 
-      this.compileChildren(children, parentNode, currentDepth, headingLabels, footnoteDefinitionsMap);
+    const compileChildren = (children: any[], parentNode: any, currentDepth: number): string[] =>
+      this.compileChildren(children, parentNode, currentDepth);
 
     switch (node.type) {
       case 'root':
@@ -424,11 +482,11 @@ export class MDXParser {
 
         if (lang === 'plantuml') {
           const hash = this.simpleHash(code);
-          return `\\begin{center}\\includegraphics[width=0.8\\textwidth]{img/plantuml_${hash}.eps}\\end{center}`;
+          return `\\begin{center}\\d2pdfimage[width=0.8\\textwidth]{img/plantuml_${hash}.eps}\\end{center}`;
         }
         if (lang === 'mermaid') {
           const hash = this.simpleHash(code);
-          return `\\begin{center}\\includegraphics[width=0.8\\textwidth]{img/mermaid_${hash}.pdf}\\end{center}`;
+          return `\\begin{center}\\d2pdfimage[width=0.8\\textwidth]{img/mermaid_${hash}.pdf}\\end{center}`;
         }
 
         // Options parsing
@@ -531,7 +589,7 @@ export class MDXParser {
           : hTitle;
 
         const rawText = getPlainText(node).trim();
-        const label = headingLabels.get(rawText);
+        const label = this.ctx.headingLabels.get(rawText);
 
         let cmd = 'section';
         if (hDepth === 2) cmd = 'subsection';
@@ -558,7 +616,7 @@ export class MDXParser {
 
         const compiled = node.children.map((c: any, index: number) => {
           c.parent = node;
-          const content = this.compileNode(c, node, depth, headingLabels, footnoteDefinitionsMap);
+          const content = this.compileNode(c, node, depth);
           if (c.type === 'paragraph' && index === 0) {
             return content.trim();
           }
@@ -571,22 +629,41 @@ export class MDXParser {
       case 'link': {
         const url = node.url || '';
         const text = compileChildren(node.children, node, depth).join('');
-        if (url.startsWith('#')) {
-          const headingText = url.substring(1);
-          const label = headingLabels.get(decodeURIComponent(headingText)) || headingLabels.get(headingText) || headingText;
-          return `\\hyperref[${label}]{${text}}`;
-        }
-        const escapedUrl = url
-          .replace(/%/g, '\\%')
-          .replace(/#/g, '\\#')
-          .replace(/_/g, '\\_')
-          .replace(/&/g, '\\&');
-        return `\\href{${escapedUrl}}{${text}}`;
+        return this.buildHref(url, text);
       }
+
+      case 'image':
+        // Inline image (inside a paragraph with text, a link, a table cell...).
+        // Image-only paragraphs are turned into figures in compileChildren.
+        return this.buildIncludeGraphics(node.url || '');
+
+      case 'imageReference': {
+        const def = this.ctx.definitions.get(node.identifier);
+        if (def) {
+          return this.buildIncludeGraphics(def.url);
+        }
+        // Unresolved reference: render as Docusaurus would (literal text)
+        return this.escapeTextAndEmoji(`![${node.alt || ''}][${node.identifier}]`);
+      }
+
+      case 'linkReference': {
+        const def = this.ctx.definitions.get(node.identifier);
+        const refText = compileChildren(node.children, node, depth).join('');
+        if (def) {
+          return this.buildHref(def.url, refText);
+        }
+        return refText;
+      }
+
+      case 'definition':
+        return '';
+
+      case 'delete':
+        return `\\sout{${compileChildren(node.children, node, depth).join('')}}`;
 
       case 'footnoteReference': {
         const id = node.identifier;
-        const def = footnoteDefinitionsMap.get(id) || '';
+        const def = this.ctx.footnoteDefs.get(id) || '';
         return `\\footnote{${def}}`;
       }
 
@@ -678,6 +755,53 @@ export class MDXParser {
         if (elName === 'code') {
           return `\\texttt{${compileChildren(node.children, node, depth).join('')}}`;
         }
+        if (elName === 'img') {
+          const src = this.getJsxAttr(node, 'src');
+          if (!src) return '';
+          const width = this.getJsxAttr(node, 'width');
+          let sizeSpec: string | undefined;
+          if (width) {
+            sizeSpec = width.endsWith('%') ? `width=${width}` : `width=${width.replace(/px$/, '')}px`;
+          }
+          const graphic = this.buildIncludeGraphics(src, sizeSpec);
+          if (node.type === 'mdxJsxTextElement') {
+            return graphic;
+          }
+          return `\\begin{figure}[H]\n\\centering\n${graphic}\n\\end{figure}`;
+        }
+        if (elName === 'a') {
+          const href = this.getJsxAttr(node, 'href') || '';
+          const text = compileChildren(node.children, node, depth).join('');
+          return href ? this.buildHref(href, text) : text;
+        }
+        if (elName === 'sub') {
+          return `\\textsubscript{${compileChildren(node.children, node, depth).join('')}}`;
+        }
+        if (elName === 'sup') {
+          return `\\textsuperscript{${compileChildren(node.children, node, depth).join('')}}`;
+        }
+        if (elName === 'kbd') {
+          return `\\fbox{\\footnotesize\\texttt{${compileChildren(node.children, node, depth).join('')}}}`;
+        }
+        if (elName === 'u' || elName === 'ins') {
+          return `\\underline{${compileChildren(node.children, node, depth).join('')}}`;
+        }
+        if (elName === 's' || elName === 'del' || elName === 'strike') {
+          return `\\sout{${compileChildren(node.children, node, depth).join('')}}`;
+        }
+        if (elName === 'mark') {
+          return `\\colorbox{yellow!30}{${compileChildren(node.children, node, depth).join('')}}`;
+        }
+        if (elName === 'center') {
+          return `\\begin{center}\n${compileChildren(node.children, node, depth).join('\n\n')}\n\\end{center}`;
+        }
+        if (elName === 'video' || elName === 'iframe' || elName === 'audio') {
+          const src = this.getJsxAttr(node, 'src') || '';
+          const kind = elName.charAt(0).toUpperCase() + elName.slice(1);
+          return src
+            ? `\\textit{[${kind}: ${this.buildHref(src, this.escapeLatex(src))}]}`
+            : `\\textit{[${kind}]}`;
+        }
         if (elName === 'details') {
           let summaryText = 'Details';
           let bodyChildren = node.children;
@@ -765,14 +889,52 @@ export class MDXParser {
 
         if (htmlVal.startsWith('<details>')) {
           const summaryMatch = htmlVal.match(/<summary>([^<]*)<\/summary>/i);
-          const summaryText = summaryMatch ? summaryMatch[1].trim() : 'Details';
-          return `\\begin{tcolorbox}[title=${summaryText}]\n`;
+          const summaryText = summaryMatch ? this.escapeLatex(summaryMatch[1].trim()) : 'Details';
+          return `\\begin{tcolorbox}[breakable,title={${summaryText}}]\n`;
         }
         if (htmlVal === '</details>') {
           return '\n\\end{tcolorbox}';
         }
 
-        return '';
+        // <img> in raw-HTML fallback mode: keep the image
+        const imgMatch = htmlVal.match(/^<img\s[^>]*src=["']([^"']+)["'][^>]*\/?>$/i);
+        if (imgMatch) {
+          const widthMatch = htmlVal.match(/\swidth=["']([^"']+)["']/i);
+          const sizeSpec = widthMatch
+            ? (widthMatch[1].endsWith('%') ? `width=${widthMatch[1]}` : `width=${widthMatch[1].replace(/px$/, '')}px`)
+            : undefined;
+          const graphic = this.buildIncludeGraphics(imgMatch[1], sizeSpec);
+          return `\\begin{figure}[H]\n\\centering\n${graphic}\n\\end{figure}`;
+        }
+
+        // <a href="...">text</a> on a single html node
+        const aMatch = htmlVal.match(/^<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*)<\/a>$/i);
+        if (aMatch) {
+          return this.buildHref(aMatch[1], this.escapeTextAndEmoji(aMatch[2].replace(/<[^>]+>/g, '')));
+        }
+        if (htmlVal.match(/^<a\s/i)) {
+          // opening <a> tag split from its text: drop the tag, keep the flow
+          return '';
+        }
+        if (htmlVal === '</a>') {
+          return '';
+        }
+
+        if (htmlVal === '<sub>') return '\\textsubscript{';
+        if (htmlVal === '</sub>') return '}';
+        if (htmlVal === '<sup>') return '\\textsuperscript{';
+        if (htmlVal === '</sup>') return '}';
+        if (htmlVal === '<kbd>') return '\\fbox{\\footnotesize\\texttt{';
+        if (htmlVal === '</kbd>') return '}}';
+        if (htmlVal === '<u>') return '\\underline{';
+        if (htmlVal === '</u>') return '}';
+        if (htmlVal === '<s>' || htmlVal === '<del>') return '\\sout{';
+        if (htmlVal === '</s>' || htmlVal === '</del>') return '}';
+
+        // Unknown HTML: strip tags but keep the text content rather than
+        // silently dropping it.
+        const stripped = htmlVal.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        return stripped ? this.escapeTextAndEmoji(stripped) : '';
       }
 
       case 'mdxFlowExpression':
@@ -793,7 +955,7 @@ export class MDXParser {
     }
   }
 
-  private compileChildren(children: any[], parentNode: any, currentDepth: number, headingLabels: Map<string, string>, footnoteDefinitionsMap: Map<string, string>): string[] {
+  private compileChildren(children: any[], parentNode: any, currentDepth: number): string[] {
     if (!children) return [];
     const results: string[] = [];
 
@@ -801,63 +963,81 @@ export class MDXParser {
       const child = children[idx];
       child.parent = parentNode;
 
-      // Image caption and size pairing logic
-      let isImageParagraph = false;
-      let imageNode: any = null;
-      let sizeSpec = '';
+      // A paragraph consisting only of images (plus optional {width=X%} size
+      // specs) becomes one figure per image. Paragraphs that mix text and
+      // images are compiled normally - the images render inline and no text
+      // is ever dropped.
+      const figureImages = child.type === 'paragraph' ? this.extractFigureImages(child) : null;
 
-      if (child.type === 'paragraph') {
-        const imageIdx = child.children.findIndex((c: any) => c.type === 'image');
-        if (imageIdx !== -1) {
-          isImageParagraph = true;
-          imageNode = child.children[imageIdx];
-
-          // Check next element inside paragraph for size attribute {width=X%}
-          if (imageIdx + 1 < child.children.length) {
-            const nextNode = child.children[imageIdx + 1];
-            if (nextNode.type === 'text' && nextNode.value.trim().startsWith('{') && nextNode.value.trim().endsWith('}')) {
-              sizeSpec = nextNode.value.trim().slice(1, -1);
-            }
-          }
-        }
-      }
-
-      if (isImageParagraph && imageNode) {
-        const filename = imageNode.url.replace(/^.*[\\/]/, '');
-        const imageTitle = imageNode.title || '';
-
-        let caption = imageTitle || '';
-        let hasNextCaption = false;
-
-        // Check next sibling paragraph for Obrázek/Figure text caption
-        if (idx + 1 < children.length) {
+      if (figureImages && figureImages.length > 0) {
+        // A following "Obrázek ..." / "Figure ..." paragraph is used as the
+        // caption when this paragraph holds a single image.
+        let caption = figureImages.length === 1 ? (figureImages[0].title || '') : '';
+        if (figureImages.length === 1 && idx + 1 < children.length) {
           const nextSibling = children[idx + 1];
           if (nextSibling.type === 'paragraph') {
             const siblingText = this.getPlainText(nextSibling).trim();
-            if (siblingText.startsWith('Obrázek') || siblingText.startsWith('Figure') || siblingText.startsWith('Obrázek:') || siblingText.startsWith('Figure:')) {
+            if (siblingText.startsWith('Obrázek') || siblingText.startsWith('Figure')) {
               caption = siblingText;
-              hasNextCaption = true;
               idx++; // consume caption sibling
             }
           }
         }
 
         const captionCmd = this.suppressCaptionNumbers ? '\\caption*' : '\\caption';
-        const includeGraphics = this.buildIncludeGraphics(filename, sizeSpec);
-        let figureContent = `\\begin{figure}[H]\n\\centering\n${includeGraphics}\n`;
-        if (caption) {
-          const escapedCaption = this.escapeLatex(caption);
-          figureContent += `${captionCmd}{${escapedCaption}}\n`;
+        for (const img of figureImages) {
+          const includeGraphics = this.buildIncludeGraphics(img.url, img.sizeSpec);
+          let figureContent = `\\begin{figure}[H]\n\\centering\n${includeGraphics}\n`;
+          const figCaption = figureImages.length === 1 ? caption : (img.title || '');
+          if (figCaption) {
+            figureContent += `${captionCmd}{${this.escapeTextAndEmoji(figCaption)}}\n`;
+          }
+          figureContent += `\\end{figure}`;
+          results.push(figureContent);
         }
-        figureContent += `\\end{figure}`;
-        results.push(figureContent);
         continue;
       }
 
-      results.push(this.compileNode(child, parentNode, currentDepth, headingLabels, footnoteDefinitionsMap));
+      results.push(this.compileNode(child, parentNode, currentDepth));
     }
 
     return results;
+  }
+
+  /**
+   * If the paragraph contains only images, size specs ({width=50%} text
+   * right after an image), whitespace and line breaks, return the images.
+   * Otherwise return null - the paragraph must be compiled as regular
+   * inline content.
+   */
+  private extractFigureImages(paragraph: any): Array<{ url: string; title?: string; sizeSpec?: string }> | null {
+    const images: Array<{ url: string; title?: string; sizeSpec?: string }> = [];
+
+    for (const node of paragraph.children) {
+      if (node.type === 'image') {
+        images.push({ url: node.url || '', title: node.title || undefined });
+      } else if (node.type === 'imageReference') {
+        const def = this.ctx.definitions.get(node.identifier);
+        if (!def) return null;
+        images.push({ url: def.url, title: def.title });
+      } else if (node.type === 'text') {
+        const trimmed = node.value.trim();
+        if (trimmed === '') continue;
+        if (trimmed.startsWith('{') && trimmed.endsWith('}') && images.length > 0) {
+          images[images.length - 1].sizeSpec = trimmed.slice(1, -1);
+        } else {
+          return null;
+        }
+      } else if (node.type === 'break') {
+        continue;
+      } else if (node.type === 'mdxTextExpression' && /^\s*width\s*=/.test(node.value || '') && images.length > 0) {
+        images[images.length - 1].sizeSpec = (node.value || '').trim();
+      } else {
+        return null;
+      }
+    }
+
+    return images.length > 0 ? images : null;
   }
 
   /**

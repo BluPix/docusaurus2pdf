@@ -56,7 +56,7 @@ flowchart LR
 `;
 
     const result = await parser.parse(input);
-    expect(result.Content).toContain('\\includegraphics');
+    expect(result.Content).toContain('\\d2pdfimage');
     expect(result.Content).toContain('mermaid_');
     expect(result.Content).toContain('.pdf');
   });
