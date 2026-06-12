@@ -96,7 +96,7 @@ export async function buildPDF(
       ];
     } else {
       const texLiveImage = 'texlive/texlive:latest';
-      const texEngine = engine === 'lualatex' ? 'lualatex' : 'xelatex';
+      const texEngine = engine === 'lualatex' ? 'lualatex' : engine === 'pdflatex' ? 'pdflatex' : 'xelatex';
       cmd = [
         'run', '--rm',
         '-v', `${absPath}:/work`,
@@ -111,8 +111,8 @@ export async function buildPDF(
     
     const timer = setTimeout(() => {
       proc.kill();
-      reject(new Error(`LaTeX compilation timed out after 60 seconds.`));
-    }, 60000);
+      reject(new Error(`LaTeX compilation timed out after 300 seconds.`));
+    }, 300000);
 
     proc.on('exit', async (code) => {
       clearTimeout(timer);
@@ -145,8 +145,8 @@ async function buildPDFLocal(
     
     const timer = setTimeout(() => {
       proc.kill();
-      reject(new Error(`LaTeX compilation timed out after 60 seconds.`));
-    }, 60000);
+      reject(new Error(`LaTeX compilation timed out after 300 seconds.`));
+    }, 300000);
 
     proc.on('exit', async (code) => {
       clearTimeout(timer);

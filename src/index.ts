@@ -38,7 +38,6 @@ export {
 } from './utils/docker.js';
 
 // Converters (for advanced usage)
-export * from './mdx/converters/index.js';
 
 // Version
 export const version = '2.0.0';

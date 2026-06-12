@@ -35,7 +35,7 @@ export default function docusaurus2PDFPlugin(
         ? opts.outputDir!
         : path.join(siteDir, opts.outputDir!);
 
-      const args: string[] = ['-i', siteDir, '-o', outputDir];
+      const args: string[] = ['-i', JSON.stringify(siteDir), '-o', JSON.stringify(outputDir)];
 
       if (opts.single) args.push('--single');
       if (opts.sections?.length) args.push('--sections', opts.sections.join(','));

@@ -358,28 +358,8 @@ export class Renderer {
     return this.copyStaticAssets(site);
   }
 
-  private extractPlantUMLDiagrams(content: string): Array<{ hash: string; code: string }> {
-    const diagrams: Array<{ hash: string; code: string }> = [];
-    const seen = new Set<string>();
-    
-    // Find all PlantUML code blocks in the content
-    const plantumlRegex = /```plantuml\n([\s\S]*?)```/g;
-    let match: RegExpExecArray | null;
-    
-    while ((match = plantumlRegex.exec(content)) !== null) {
-      const code = match[1].trim();
-      const hash = createHash('md5').update(code).digest('hex').slice(0, 8);
-      
-      if (!seen.has(hash)) {
-        seen.add(hash);
-        diagrams.push({ hash, code });
-      }
-    }
-    
-    return diagrams;
-  }
-
   async generatePlantUMLDiagrams(sections: DocumentSection[]): Promise<void> {
+    if (this.opts.SkipDiagrams) return;
     // Collect all unique PlantUML diagrams
     const allDiagrams = new Map<string, string>();
     for (const section of sections) {
@@ -604,35 +584,8 @@ skinparam packageFontName Serif
     }
   }
 
-  private encodePlantUML(text: string): string {
-    // PlantUML uses deflate + custom encoding with ~1 header for huffman encoding
-    const compressed = pako.deflate(Buffer.from(text, 'utf8'), { level: 9 });
-    return '~1' + this.plantumlEncode(Buffer.from(compressed));
-  }
-
-  private plantumlEncode(buffer: Buffer): string {
-    // PlantUML specific encoding
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
-    let result = '';
-    
-    for (let i = 0; i < buffer.length; i += 3) {
-      const b1 = buffer[i];
-      const b2 = i + 1 < buffer.length ? buffer[i + 1] : 0;
-      const b3 = i + 2 < buffer.length ? buffer[i + 2] : 0;
-      
-      const c1 = b1 >> 2;
-      const c2 = ((b1 & 0x3) << 4) | (b2 >> 4);
-      const c3 = ((b2 & 0xf) << 2) | (b3 >> 6);
-      const c4 = b3 & 0x3f;
-      
-      result += chars.charAt(c1) + chars.charAt(c2);
-      if (i + 1 < buffer.length) result += chars.charAt(c3);
-      if (i + 2 < buffer.length) result += chars.charAt(c4);
-    }
-    return result;
-  }
-
   async generateMermaidDiagrams(sections: DocumentSection[]): Promise<void> {
+    if (this.opts.SkipDiagrams) return;
     // Collect all unique Mermaid diagrams
     const allDiagrams = new Map<string, string>();
     for (const section of sections) {

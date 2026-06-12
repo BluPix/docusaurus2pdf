@@ -421,7 +421,8 @@ describe('MDXParser Comprehensive Tests', () => {
     it('keeps placeholder if variable not found', async () => {
       const input = '---\ntitle: Test\n---\n\nContent\n\nUnknown: {{ unknown }}';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('{{ unknown }}');
+      // escaped braces so the placeholder is actually visible in the PDF
+      expect(result.Content).toContain('\\{\\{ unknown \\}\\}');
     });
   });
 

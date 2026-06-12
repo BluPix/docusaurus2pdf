@@ -1189,14 +1189,28 @@ export class MDXParser {
       case 'mdxFlowExpression':
       case 'mdxTextExpression': {
         const val = (node.value || '').trim();
+        // JSX comments
         if (val.startsWith('/*') && val.endsWith('*/')) {
           return '';
         }
-        if (val.startsWith('{') && val.endsWith('}')) {
-          const inner = val.slice(1, -1).trim();
-          return `{{ ${this.escapeLatex(inner)} }}`;
+        // String and number literals render their value
+        const strMatch = val.match(/^['"`]([\s\S]*)['"`]$/);
+        if (strMatch) {
+          return this.escapeTextAndEmoji(strMatch[1]);
         }
-        return `{{ ${this.escapeLatex(val)} }}`;
+        if (/^-?\d+(\.\d+)?$/.test(val)) {
+          return val;
+        }
+        // "{{ name }}" is this tool's template-variable syntax; an
+        // unresolved variable stays visible so authors can spot it
+        const varMatch = val.match(/^\{\s*(\w+)\s*\}$/);
+        if (varMatch) {
+          return this.escapeTextAndEmoji(`{{ ${varMatch[1]} }}`);
+        }
+        // Dynamic expressions ({props.x}, {siteConfig.y}) cannot be
+        // evaluated in a static export - dropping them beats printing
+        // literal {{ ... }} garbage into the PDF
+        return '';
       }
 
       default:

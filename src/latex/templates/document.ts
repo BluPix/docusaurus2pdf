@@ -83,15 +83,23 @@ function formatSection(section: DocumentSection): string {
 }
 
 function escapeString(str: string): string {
-  return str
-    .replace(/\\/g, '\\textbackslash{}')
-    .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}')
-    .replace(/\$/g, '\\$')
-    .replace(/&/g, '\\&')
-    .replace(/%/g, '\\%')
-    .replace(/#/g, '\\#')
-    .replace(/_/g, '\\_')
-    .replace(/\^/g, '\\textasciicircum{}')
-    .replace(/~/g, '\\textasciitilde{}');
+  // Char-by-char so replacement text (e.g. the braces in \textbackslash{})
+  // is never re-escaped by a later pass
+  let result = '';
+  for (const char of str) {
+    switch (char) {
+      case '\\': result += '\\textbackslash{}'; break;
+      case '{': result += '\\{'; break;
+      case '}': result += '\\}'; break;
+      case '$': result += '\\$'; break;
+      case '&': result += '\\&'; break;
+      case '%': result += '\\%'; break;
+      case '#': result += '\\#'; break;
+      case '_': result += '\\_'; break;
+      case '^': result += '\\textasciicircum{}'; break;
+      case '~': result += '\\textasciitilde{}'; break;
+      default: result += char;
+    }
+  }
+  return result;
 }
