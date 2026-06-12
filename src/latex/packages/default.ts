@@ -22,7 +22,10 @@ export function getEnginePackages(engine: string, langConfig: LanguageConfig): P
         '})}',
         '\\setmainfont{Latin Modern Roman}[RawFeature={fallback=d2pfallback}]',
         '\\setsansfont{Latin Modern Sans}[RawFeature={fallback=d2pfallback}]',
-        '\\setmonofont{Latin Modern Mono}[RawFeature={fallback=d2pfallback}]',
+        '% Mono font with native box-drawing glyphs: fallback-font glyphs',
+        '% break line layout inside lstlisting, so code needs a font that',
+        '% covers directory trees directly',
+        '\\setmonofont{DejaVu Sans Mono}[Scale=MatchLowercase]',
         '\\newfontfamily\\emojifont{Twemoji Mozilla}',
         '\\usepackage{emoji}',
         '\\setemojifont{Twemoji Mozilla}',
@@ -69,7 +72,8 @@ export function getCommonPackages(): PackageSet {
       '\\usepackage[hidelinks]{hyperref}', // Completely hide link borders and colors
       '\\usepackage{bookmark}', // Better PDF bookmarks
       '\\usepackage{microtype}', // Better typography and hyphenation
-      '\\usepackage{csquotes}', // Czech quotes support
+      '\\usepackage{fvextra}', // Unicode-clean verbatim for non-Latin code blocks
+      '\\usepackage{csquotes}', // Czech quotes support (after fvextra)
       '\\usepackage{listings}',
       '% Global listings style: wrap long lines (with a return marker) so',
       '% code never overflows the page; light frame and background',
@@ -117,7 +121,7 @@ export function getCommonPackages(): PackageSet {
       '% Image inclusion helper: natural size, capped at the line width and',
       '% 0.45\\textheight; typesets a visible placeholder when a file is missing',
       '\\newsavebox{\\dtopimgbox}',
-      '\\newcommand{\\d2pdfimage}[2][]{%',
+      '\\newcommand{\\docimage}[2][]{%',
       '  \\IfFileExists{#2}{%',
       '    \\sbox{\\dtopimgbox}{\\includegraphics[#1]{#2}}%',
       '    \\ifdim\\wd\\dtopimgbox>\\linewidth',

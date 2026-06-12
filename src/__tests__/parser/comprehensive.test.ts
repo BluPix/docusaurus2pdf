@@ -155,7 +155,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const input = '# Test\n\n```mermaid\ngraph TD;\n```';
       const result = await parser.parse(input);
       expect(result.Content).toContain('mermaid_');
-      expect(result.Content).toContain('\\d2pdfimage');
+      expect(result.Content).toContain('\\docimage');
       expect(result.Content).toContain('.pdf');
     });
 
@@ -241,10 +241,10 @@ describe('MDXParser Comprehensive Tests', () => {
       expect(result.Content).toContain('\\href{https://example.com}{Link}');
     });
 
-    it('converts ![alt](path) to \\d2pdfimage', async () => {
+    it('converts ![alt](path) to \\docimage', async () => {
       const input = '# Test\n\n![Diagram](img/diagram.png)';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('\\d2pdfimage');
+      expect(result.Content).toContain('\\docimage');
       expect(result.Content).toContain('diagram.png');
     });
   });
@@ -507,7 +507,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\begin{figure}');
       expect(result.Content).toContain('\\centering');
-      expect(result.Content).toContain('\\d2pdfimage');
+      expect(result.Content).toContain('\\docimage');
       expect(result.Content).toContain('\\end{figure}');
     });
 
@@ -516,7 +516,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\begin{figure}');
       expect(result.Content).toContain('\\centering');
-      expect(result.Content).toContain('\\d2pdfimage');
+      expect(result.Content).toContain('\\docimage');
       expect(result.Content).toContain('\\caption{Caption}');
       expect(result.Content).toContain('\\end{figure}');
     });
@@ -533,7 +533,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const input = '# Test\n\n![Alt text](img/example.png)\n\n*Obrázek 1.1 – Test description*\n\n---';
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\begin{figure}');
-      expect(result.Content).toContain('\\d2pdfimage');
+      expect(result.Content).toContain('\\docimage');
       expect(result.Content).toContain('\\caption{Obrázek 1.1 – Test description}');
       expect(result.Content).toContain('\\end{figure}');
     });

@@ -361,7 +361,7 @@ export class MDXParser {
   }
 
   /**
-   * Emit graphics inclusion wrapped in \d2pdfimage (defined in the preamble),
+   * Emit graphics inclusion wrapped in \docimage (defined in the preamble),
    * which caps size at the text block while keeping small images at natural
    * size, and typesets a visible placeholder when the file is missing.
    */
@@ -371,16 +371,16 @@ export class MDXParser {
       const widthMatch = size.match(/width=(\d+)\s*%/);
       if (widthMatch) {
         const percent = parseInt(widthMatch[1], 10) / 100;
-        return `\\d2pdfimage[width=${percent}\\textwidth]{${texPath}}`;
+        return `\\docimage[width=${percent}\\textwidth]{${texPath}}`;
       }
       const pxMatch = size.match(/width=(\d+)(px)?\s*$/);
       if (pxMatch) {
         // CSS px -> pt (96dpi -> 72.27pt/in); px is not a XeTeX unit
         const pt = (parseInt(pxMatch[1], 10) * 0.75).toFixed(1);
-        return `\\d2pdfimage[width=${pt}pt]{${texPath}}`;
+        return `\\docimage[width=${pt}pt]{${texPath}}`;
       }
     }
-    return `\\d2pdfimage{${texPath}}`;
+    return `\\docimage{${texPath}}`;
   }
 
   /**
@@ -675,11 +675,11 @@ export class MDXParser {
 
         if (lang === 'plantuml') {
           const hash = this.simpleHash(code);
-          return `\\begin{center}\\d2pdfimage[width=0.8\\textwidth]{img/plantuml_${hash}.eps}\\end{center}`;
+          return `\\begin{center}\\docimage[width=0.8\\textwidth]{img/plantuml_${hash}.eps}\\end{center}`;
         }
         if (lang === 'mermaid') {
           const hash = this.simpleHash(code);
-          return `\\begin{center}\\d2pdfimage[width=0.8\\textwidth]{img/mermaid_${hash}.pdf}\\end{center}`;
+          return `\\begin{center}\\docimage[width=0.8\\textwidth]{img/mermaid_${hash}.pdf}\\end{center}`;
         }
 
         // Options parsing
@@ -747,7 +747,12 @@ export class MDXParser {
         // equivalent; the lines render unhighlighted rather than failing
         // the compile with an unknown key.
         if (blockTitle) {
-          params.push(`caption={${this.escapeLatex(blockTitle)}}`);
+          // listings treats [...] inside caption= as its short-caption
+          // syntax; brace-group the brackets to keep them literal
+          const safeTitle = this.escapeLatex(blockTitle)
+            .replace(/\[/g, '{[}')
+            .replace(/\]/g, '{]}');
+          params.push(`caption={${safeTitle}}`);
         }
 
         cleanCode = cleanCode
@@ -758,8 +763,19 @@ export class MDXParser {
           .replace(/\{#\s*highlight-next-line\s*\}/g, '')
           .replace(/\{#\s*highlight-start[\s\S]*?\{#\s*highlight-end\s*\}/g, '');
 
-        const paramsStr = params.length > 0 ? `[${params.join(',')}]` : '';
         const codeBody = cleanCode.endsWith('\n') ? cleanCode : `${cleanCode}\n`;
+
+        // listings mishandles characters beyond Latin scripts (box-drawing
+        // trees, arrows, emoji) under LuaLaTeX - line layout falls apart.
+        // Such blocks go through fvextra's Verbatim, which is Unicode-clean
+        // (at the cost of syntax highlighting).
+        if (/[^\t-\r -ӿḀ-ỿ–—‘-‟…]/u.test(cleanCode)) {
+          const vparams = ['breaklines=true', 'frame=single', 'rulecolor=\\color{black!20}', 'fontsize=\\footnotesize'];
+          if (showLineNumbers) vparams.push('numbers=left');
+          return `\\begin{Verbatim}[${vparams.join(',')}]\n${codeBody}\\end{Verbatim}`;
+        }
+
+        const paramsStr = params.length > 0 ? `[${params.join(',')}]` : '';
         return `\\begin{lstlisting}${paramsStr}\n${codeBody}\\end{lstlisting}`;
       }
 
