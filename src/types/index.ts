@@ -104,6 +104,12 @@ export interface MDXParserOptions {
   suppressCaptionNumbers?: boolean;
   /** Document language; enables language-specific typography (vlna for cs/sk). */
   language?: string;
+  /**
+   * Canonical keys of all documents in the build (MDXParser.canonicalDocKey).
+   * When set, cross-document links resolve to internal \hyperref targets;
+   * unresolvable links degrade to plain text instead of dead URLs.
+   */
+  knownDocs?: Set<string>;
 }
 
 // Renderer types
@@ -130,6 +136,8 @@ export interface DocumentSection {
   Title: string;
   Content: string;
   Level: number;
+  /** Canonical doc key; emitted as \label{doc:<key>} for cross-doc links. */
+  LabelKey?: string;
   PlantUMLDiagrams?: Array<{ hash: string; code: string }>;
   MermaidDiagrams?: Array<{ hash: string; code: string }>;
 }

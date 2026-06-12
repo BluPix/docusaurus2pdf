@@ -12,7 +12,8 @@ import { applyVlna } from '../latex/vlna.js';
 export type { ParsedPage, MDXParserOptions } from '../types/index.js';
 
 interface ParseContext {
-  headingLabels: Map<string, string>;
+  /** All heading anchor slugs defined on the current page. */
+  anchors: Set<string>;
   footnoteDefs: Map<string, string>;
   definitions: Map<string, { url: string; title?: string }>;
 }
@@ -24,11 +25,13 @@ export class MDXParser {
   private suppressCaptionNumbers: boolean = false;
   private useVlna: boolean = false;
   private ctx: ParseContext = {
-    headingLabels: new Map(),
+    anchors: new Set(),
     footnoteDefs: new Map(),
     definitions: new Map(),
   };
   private currentDocDir: string = '';
+  private currentLabelPrefix: string = '';
+  private knownDocs?: Set<string>;
   private remoteImages: Array<{ url: string; filename: string }> = [];
 
   setOptions(opts: MDXParserOptions): void {
@@ -47,6 +50,35 @@ export class MDXParser {
     if (opts.language !== undefined) {
       this.useVlna = SupportedLanguages[opts.language]?.Vlna ?? false;
     }
+    if ('knownDocs' in opts) {
+      this.knownDocs = opts.knownDocs;
+    }
+  }
+
+  /**
+   * Docusaurus-compatible slug (github-slugger keeps Unicode letters, so
+   * Czech anchors like #úvod-do-systému must keep their diacritics).
+   */
+  static slugify(text: string): string {
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+      .replace(/\s+/g, '-');
+  }
+
+  /** Canonical document key shared between labels and cross-doc links. */
+  static canonicalDocKey(docPath: string): string {
+    const parts: string[] = [];
+    for (const p of docPath.replace(/\\/g, '/').replace(/\.(mdx?|MDX?)$/, '').split('/')) {
+      if (!p || p === '.') continue;
+      if (p === '..') {
+        parts.pop();
+        continue;
+      }
+      parts.push(p);
+    }
+    return parts.join('__');
   }
 
   private escapeLatex(s: string): string {
@@ -149,6 +181,45 @@ export class MDXParser {
     return result;
   }
 
+  /**
+   * Docusaurus explicit heading anchors: "## Title {#custom-id}".
+   * In MDX mode the trailing "{#custom-id}" arrives as an mdxTextExpression
+   * child; in fallback mode it is part of the trailing text node. Either way
+   * it must be removed from the rendered title and used as the anchor.
+   */
+  private extractExplicitHeadingId(node: any): string | null {
+    const children = node.children || [];
+    if (children.length === 0) return null;
+    const last = children[children.length - 1];
+
+    if (last.type === 'mdxTextExpression') {
+      const val = (last.value || '').trim();
+      const m = val.match(/^#([^\s{}]+)$/);
+      if (m) {
+        children.pop();
+        // trim trailing whitespace of the preceding text node
+        const prev = children[children.length - 1];
+        if (prev && prev.type === 'text') prev.value = prev.value.replace(/\s+$/, '');
+        return m[1];
+      }
+      return null;
+    }
+
+    if (last.type === 'text') {
+      const m = (last.value || '').match(/^(.*?)\s*\{#([^\s{}]+)\}\s*$/);
+      if (m) {
+        if (m[1]) {
+          last.value = m[1];
+        } else {
+          children.pop();
+        }
+        return m[2];
+      }
+    }
+
+    return null;
+  }
+
   private getJsxAttr(node: any, name: string): string | undefined {
     const attr = node.attributes?.find((a: any) => a.name === name);
     if (!attr) return undefined;
@@ -158,17 +229,76 @@ export class MDXParser {
   }
 
   private buildHref(url: string, text: string): string {
+    // Same-page anchor
     if (url.startsWith('#')) {
-      const headingText = url.substring(1);
-      const label = this.ctx.headingLabels.get(decodeURIComponent(headingText)) || this.ctx.headingLabels.get(headingText) || headingText;
-      return `\\hyperref[${label}]{${text}}`;
+      const anchor = this.resolveAnchorSlug(decodeURIComponent(url.substring(1)));
+      return `\\hyperref[${this.currentLabelPrefix}${anchor}]{${text}}`;
     }
+
+    // Protocol-relative URL is external
+    if (url.startsWith('//')) {
+      return `\\href{https:${url.replace(/%/g, '\\%').replace(/#/g, '\\#').replace(/_/g, '\\_').replace(/&/g, '\\&')}}{${text}}`;
+    }
+
+    // Cross-document link (./other.md, ../dir/doc.mdx, /docs/foo#bar)
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+      const resolved = this.resolveDocLink(url);
+      if (resolved) {
+        return `\\hyperref[${resolved}]{${text}}`;
+      }
+      // Unresolvable internal link: keep the text, drop the dead URL
+      return text;
+    }
+
     const escapedUrl = url
       .replace(/%/g, '\\%')
       .replace(/#/g, '\\#')
       .replace(/_/g, '\\_')
       .replace(/&/g, '\\&');
     return `\\href{${escapedUrl}}{${text}}`;
+  }
+
+  /** Match a written anchor against the page's heading slugs. */
+  private resolveAnchorSlug(anchor: string): string {
+    if (this.ctx.anchors.has(anchor)) return anchor;
+    const slugged = MDXParser.slugify(anchor);
+    if (this.ctx.anchors.has(slugged)) return slugged;
+    return anchor;
+  }
+
+  /**
+   * Resolve a relative or site-absolute doc link to a LaTeX label.
+   * Returns null when the target is not part of this build.
+   */
+  private resolveDocLink(url: string): string | null {
+    const [pathPartRaw, anchorRaw] = url.split('#');
+    let pathPart = decodeURIComponent(pathPartRaw || '');
+    const anchor = anchorRaw ? MDXParser.slugify(decodeURIComponent(anchorRaw)) : '';
+
+    if (!pathPart) {
+      // "#..." handled by caller; bare empty url
+      return null;
+    }
+
+    if (pathPart.startsWith('/')) {
+      // Site-absolute: strip the routeBasePath segment (usually /docs)
+      pathPart = pathPart.replace(/^\/+/, '').replace(/^docs\//, '');
+    } else {
+      pathPart = this.currentDocDir ? `${this.currentDocDir}/${pathPart}` : pathPart;
+    }
+
+    const canonical = MDXParser.canonicalDocKey(pathPart.replace(/\/+$/, ''));
+    if (!canonical) return null;
+
+    if (this.knownDocs) {
+      const candidates = [canonical, `${canonical}__index`, `${canonical}__README`];
+      const found = candidates.find((c) => this.knownDocs!.has(c));
+      if (!found) return null;
+      return anchor ? `${found}:${anchor}` : `doc:${found}`;
+    }
+
+    // No registry available (direct API use): resolve optimistically
+    return anchor ? `${canonical}:${anchor}` : `doc:${canonical}`;
   }
 
   /**
@@ -249,9 +379,12 @@ export class MDXParser {
   /**
    * @param docDir directory of the document relative to the docs root
    *               (POSIX style, e.g. "api/core"); used to resolve image paths
+   * @param labelPrefix unique per-document prefix for LaTeX labels so that
+   *               headings with the same text on different pages don't clash
    */
-  async parse(source: string, docDir: string = ''): Promise<ParsedPage> {
+  async parse(source: string, docDir: string = '', labelPrefix: string = ''): Promise<ParsedPage> {
     this.currentDocDir = docDir.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    this.currentLabelPrefix = labelPrefix ? `${labelPrefix}:` : '';
     this.remoteImages = [];
     const { content, frontmatter } = this.extractFrontmatter(source);
     const processedContent = this.preprocessContent(content, frontmatter);
@@ -289,22 +422,22 @@ export class MDXParser {
       }
     });
 
-    const headingLabels = new Map<string, string>();
-    const usedLabels = new Map<string, number>();
+    // Assign a Docusaurus-compatible slug to every heading. Explicit
+    // {#custom-id} anchors win; duplicates get -1, -2... suffixes. The slug
+    // is stored on the node itself so repeated heading texts cannot clash.
+    const anchors = new Set<string>();
+    const usedSlugs = new Map<string, number>();
 
     visit(ast, 'heading', (node: any) => {
-      const rawText = this.getPlainText(node).trim();
-      let label = rawText
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '');
-
-      const count = usedLabels.get(label) || 0;
-      if (count > 0) {
-        label = `${label}-${count}`;
+      const explicitId = this.extractExplicitHeadingId(node);
+      let slug = explicitId ?? MDXParser.slugify(this.getPlainText(node));
+      if (!explicitId) {
+        const count = usedSlugs.get(slug) || 0;
+        usedSlugs.set(slug, count + 1);
+        if (count > 0) slug = `${slug}-${count}`;
       }
-      usedLabels.set(label, count + 1);
-      headingLabels.set(rawText, label);
+      node.data = { ...node.data, d2pSlug: slug };
+      anchors.add(slug);
     });
 
     // Reference-style link/image definitions ([ref]: https://...)
@@ -313,7 +446,7 @@ export class MDXParser {
       definitions.set(node.identifier, { url: node.url || '', title: node.title || undefined });
     });
 
-    this.ctx = { headingLabels, footnoteDefs: new Map(), definitions };
+    this.ctx = { anchors, footnoteDefs: new Map(), definitions };
 
     visit(ast, 'footnoteDefinition', (node: any) => {
       const compiled = node.children.map((c: any) => this.compileNode(c, node, 0)).join('\n\n').trim();
@@ -638,15 +771,14 @@ export class MDXParser {
           ? hTitle.replace(/^(\d+(?:\.\d+)*[\)\.]?\s+|\d+[â£ï¿½]\s*\.\s*)/, '')
           : hTitle;
 
-        const rawText = getPlainText(node).trim();
-        const label = this.ctx.headingLabels.get(rawText);
+        const slug = node.data?.d2pSlug;
 
         let cmd = 'section';
         if (hDepth === 2) cmd = 'subsection';
         else if (hDepth >= 3) cmd = 'subsubsection';
 
-        if (label) {
-          return `\\${cmd}{${cleanedTitle}}\\label{${label}}`;
+        if (slug) {
+          return `\\${cmd}{${cleanedTitle}}\\label{${this.currentLabelPrefix}${slug}}`;
         }
         return `\\${cmd}{${cleanedTitle}}`;
       }

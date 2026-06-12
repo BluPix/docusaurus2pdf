@@ -75,9 +75,10 @@ export function generateDocument(
 }
 
 function formatSection(section: DocumentSection): string {
-  const cmd = section.Level === 1 ? '\\section' : 
+  const cmd = section.Level === 1 ? '\\section' :
               section.Level === 2 ? '\\subsection' : '\\subsubsection';
-  return `${cmd}{${escapeString(section.Title)}}\n${section.Content}`;
+  const label = section.LabelKey ? `\\label{doc:${section.LabelKey}}` : '';
+  return `${cmd}{${escapeString(section.Title)}}${label}\n${section.Content}`;
 }
 
 function escapeString(str: string): string {

@@ -154,7 +154,17 @@ export class Renderer {
 
   private async convertDocsToSections(docs: DocPage[], language: string = 'en', docsDir?: string): Promise<DocumentSection[]> {
     const sections: DocumentSection[] = [];
-    this.mdxParser.setOptions({ language });
+
+    const docKey = (doc: DocPage): string => {
+      if (!docsDir) return '';
+      const rel = path.relative(docsDir, doc.Path).split(path.sep).join('/');
+      return rel.startsWith('..') ? '' : MDXParser.canonicalDocKey(rel);
+    };
+
+    // Registry of all docs in this build so cross-document links can be
+    // resolved to internal references (or gracefully degrade to text)
+    const knownDocs = new Set<string>(docs.map(docKey).filter(Boolean));
+    this.mdxParser.setOptions({ language, knownDocs });
 
     for (const doc of docs) {
       try {
@@ -164,7 +174,8 @@ export class Renderer {
           const rel = path.relative(docsDir, path.dirname(doc.Path)).split(path.sep).join('/');
           docDir = rel.startsWith('..') ? '' : rel;
         }
-        const parsed = await this.mdxParser.parse(content, docDir);
+        const labelKey = docKey(doc);
+        const parsed = await this.mdxParser.parse(content, docDir, labelKey);
         for (const remote of parsed.RemoteImages || []) {
           this.pendingRemoteImages.set(remote.url, remote.filename);
         }
@@ -172,11 +183,12 @@ export class Renderer {
         // Use PlantUML diagrams extracted by the parser
         const plantumlDiagrams = parsed.PlantUMLDiagrams || [];
         const mermaidDiagrams = parsed.MermaidDiagrams || [];
-        
+
         sections.push({
           Title: parsed.Title,
           Content: parsed.Content,
           Level: 1,
+          LabelKey: labelKey || undefined,
           PlantUMLDiagrams: plantumlDiagrams.length > 0 ? plantumlDiagrams : undefined,
           MermaidDiagrams: mermaidDiagrams.length > 0 ? mermaidDiagrams : undefined,
         });
@@ -189,7 +201,7 @@ export class Renderer {
         });
       }
     }
-    
+
     return sections;
   }
 
