@@ -456,7 +456,8 @@ export class MDXParser {
     this.ctx = { anchors, footnoteDefs: new Map(), definitions };
 
     visit(ast, 'footnoteDefinition', (node: any) => {
-      const compiled = node.children.map((c: any) => this.compileNode(c, node, 0)).join('\n\n').trim();
+      // depth 1: footnote text cannot contain page-breaking environments
+      const compiled = node.children.map((c: any) => this.compileNode(c, node, 1)).join('\n\n').trim();
       this.ctx.footnoteDefs.set(node.identifier, compiled);
     });
 
@@ -653,13 +654,15 @@ export class MDXParser {
         return `\\textbf{${compileChildren(node.children, node, depth).join('')}}`;
 
       case 'blockquote':
-        return `\\textit{${compileChildren(node.children, node, depth).join('')}}`;
+        // quote environment with italic shape - block children (paragraphs,
+        // lists) keep their structure instead of being glued into \textit
+        return `\\begin{quote}\\itshape\n${compileChildren(node.children, node, depth + 1).join('\n\n')}\n\\end{quote}`;
 
       case 'break':
         return '\\\\';
 
       case 'thematicBreak':
-        return '\\vspace{1em}';
+        return '\\begin{center}\\rule{0.45\\linewidth}{0.4pt}\\end{center}';
 
       case 'inlineCode': {
         return `\\texttt{${this.escapeLatex(node.value)}}`;
@@ -784,7 +787,8 @@ export class MDXParser {
 
       case 'list': {
         const listType = node.ordered ? 'enumerate' : 'itemize';
-        const body = compileChildren(node.children, node, depth).join('\n');
+        // depth + 1: page-breaking environments (longtable) cannot nest here
+        const body = compileChildren(node.children, node, depth + 1).join('\n');
         return `\\begin{${listType}}\n${body}\n\\end{${listType}}`;
       }
 
@@ -872,25 +876,62 @@ export class MDXParser {
         const numCols = headerRow ? headerRow.children.length : 0;
         if (numCols === 0) return '';
 
+        // Column alignment from the |:--|:-:|--:| markers
         const colWidth = `\\dimexpr\\textwidth/${numCols}-2\\tabcolsep-\\arrayrulewidth\\relax`;
-        const colSpec = Array(numCols).fill(`p{${colWidth}}`).join('|');
+        const alignPrefix = (align: string | null): string => {
+          if (align === 'center') return '>{\\centering\\arraybackslash}';
+          if (align === 'right') return '>{\\raggedleft\\arraybackslash}';
+          return '>{\\raggedright\\arraybackslash}';
+        };
+        const aligns: Array<string | null> = node.align || [];
+        const colSpec = Array.from({ length: numCols }, (_, i) =>
+          `${alignPrefix(aligns[i] ?? null)}p{${colWidth}}`
+        ).join('|');
 
-        let latex = `\n\\vspace{1em}\n`;
-        latex += `\\renewcommand{\\arraystretch}{1.5}\n`;
-        latex += `\\begin{tabular}{|${colSpec}|}\n\\hline\n`;
-
-        const rows = node.children.map((rowNode: any) => {
+        const compileRow = (rowNode: any, bold: boolean): string => {
           const cells = rowNode.children.map((cellNode: any) => {
-            return compileChildren(cellNode.children, cellNode, depth).join('').trim();
-          }).join(' & ');
-          return `${cells} \\\\\n\\hline`;
-        }).join('\n');
+            const cell = compileChildren(cellNode.children, cellNode, depth).join('').trim();
+            return bold ? `\\textbf{${cell}}` : cell;
+          });
+          // pad missing cells so ragged author rows still compile
+          while (cells.length < numCols) cells.push('');
+          return `${cells.slice(0, numCols).join(' & ')} \\\\\n\\hline`;
+        };
 
-        latex += rows + '\n';
-        latex += '\\end{tabular}\n';
-        latex += `\\renewcommand{\\arraystretch}{1}\n`;
-        latex += '\\vspace{1em}\n';
-        return latex;
+        const headerLatex = compileRow(headerRow, true);
+        const bodyLatex = node.children.slice(1).map((r: any) => compileRow(r, false)).join('\n');
+
+        // longtable breaks across pages and repeats the header, but cannot
+        // live inside boxes/lists - use tabular there
+        if (depth > 0) {
+          return [
+            '',
+            '\\vspace{1em}',
+            '{\\renewcommand{\\arraystretch}{1.3}',
+            `\\begin{tabular}{|${colSpec}|}`,
+            '\\hline',
+            headerLatex,
+            bodyLatex,
+            '\\end{tabular}}',
+            '\\vspace{1em}',
+            '',
+          ].filter((l) => l !== '').join('\n');
+        }
+
+        return [
+          '',
+          '{\\renewcommand{\\arraystretch}{1.3}',
+          `\\begin{longtable}{|${colSpec}|}`,
+          '\\hline',
+          headerLatex,
+          '\\endfirsthead',
+          '\\hline',
+          headerLatex,
+          '\\endhead',
+          bodyLatex,
+          '\\end{longtable}}',
+          '',
+        ].filter((l) => l !== '').join('\n');
       }
 
       case 'containerDirective': {

@@ -12,6 +12,17 @@ export function getEnginePackages(engine: string, langConfig: LanguageConfig): P
       packages: [
         '\\documentclass[11pt,a4paper]{article}',
         '\\usepackage{fontspec}',
+        '% Fallback fonts: box-drawing chars (directory trees) come from',
+        '% DejaVu, raw emoji from Twemoji - otherwise these glyphs silently',
+        '% disappear from the PDF ("Missing character" warnings)',
+        '\\directlua{luaotfload.add_fallback("d2pfallback", {',
+        '  "DejaVuSans:mode=harf;",',
+        '  "DejaVuSansMono:mode=harf;",',
+        '  "TwemojiMozilla:mode=harf;",',
+        '})}',
+        '\\setmainfont{Latin Modern Roman}[RawFeature={fallback=d2pfallback}]',
+        '\\setsansfont{Latin Modern Sans}[RawFeature={fallback=d2pfallback}]',
+        '\\setmonofont{Latin Modern Mono}[RawFeature={fallback=d2pfallback}]',
         '\\newfontfamily\\emojifont{Twemoji Mozilla}',
         '\\usepackage{emoji}',
         '\\setemojifont{Twemoji Mozilla}',
@@ -123,6 +134,7 @@ export function getCommonPackages(): PackageSet {
       '\\usepackage[normalem]{ulem}', // \\sout strikethrough without changing \\emph
       '\\usepackage{amssymb}',
       '\\usepackage{array}',
+      '\\usepackage{longtable}', // Tables that break across pages
       '\\usepackage{fontawesome5}', // Icons for admonitions
       '\\usepackage{float}', // Force exact placement with [H]
       '\\usepackage{caption}', // Better caption control

@@ -301,11 +301,23 @@ describe('MDXParser Comprehensive Tests', () => {
 
   // ==================== TABLES ====================
   describe('Tables', () => {
-    it('converts markdown tables to tabular', async () => {
+    it('converts markdown tables to longtable with bold header', async () => {
       const input = '# Test\n\n| A | B |\n|---|---|\n| 1 | 2 |';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('\\begin{tabular}');
-      expect(result.Content).toContain('A & B');
+      expect(result.Content).toContain('\\begin{longtable}');
+      expect(result.Content).toContain('\\textbf{A} & \\textbf{B}');
+      expect(result.Content).toContain('1 & 2');
+    });
+
+    it('honors column alignment and uses tabular inside boxes', async () => {
+      const aligned = await parser.parse('| L | C | R |\n|:--|:-:|--:|\n| a | b | c |');
+      expect(aligned.Content).toContain('>{\\raggedright\\arraybackslash}p');
+      expect(aligned.Content).toContain('>{\\centering\\arraybackslash}p');
+      expect(aligned.Content).toContain('>{\\raggedleft\\arraybackslash}p');
+
+      const inBox = await parser.parse(':::note\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n:::');
+      expect(inBox.Content).toContain('\\begin{tabular}');
+      expect(inBox.Content).not.toContain('\\begin{longtable}');
     });
   });
 
