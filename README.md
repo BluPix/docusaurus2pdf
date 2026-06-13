@@ -3,8 +3,8 @@
 Convert Docusaurus documentation sites to high-quality PDF with full MDX support.
 
 [![GitHub Release](https://img.shields.io/github/v/release/BluPix/docusaurus2pdf)](https://github.com/BluPix/docusaurus2pdf/releases)
-[![License: MIT](https://img.shields.io/github/license/BluPix/docusaurus2pdf)](LICENSE)
-[![Node.js](https://img.shields.io/node/v/docusaurus2pdf)](package.json)
+[![License: MIT](https://img.shields.io/github/license/BluPix/docusaurus2pdf?cacheBust=1)](LICENSE)
+[![Node.js](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FBluPix%2Fdocusaurus2pdf%2Fmain%2Fpackage.json&query=%24.engines.node&label=Node.js)](package.json)
 
 ## Features
 
