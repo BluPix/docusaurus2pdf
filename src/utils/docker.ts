@@ -96,14 +96,14 @@ export async function buildPDF(
       ];
     } else {
       const texLiveImage = 'texlive/texlive:latest';
-      const texEngine = engine === 'lualatex' ? 'lualatex' : engine === 'pdflatex' ? 'pdflatex' : 'xelatex';
+      const engineFlag = engine === 'lualatex' ? '-pdflua' : engine === 'xelatex' ? '-pdfxe' : '-pdf';
       cmd = [
         'run', '--rm',
         '-v', `${absPath}:/work`,
         '-w', '/work',
         texLiveImage,
         'sh', '-c',
-        `${texEngine} -shell-escape -interaction=nonstopmode "${basename}" && ${texEngine} -shell-escape -interaction=nonstopmode "${basename}"`
+        `latexmk ${engineFlag} -interaction=nonstopmode "${basename}"`
       ];
     }
     
@@ -136,12 +136,19 @@ async function buildPDFLocal(
   texFile: string,
   engine: string
 ): Promise<void> {
-  const cmd = engine === 'pdflatex' ? 'pdflatex' : (engine === 'lualatex' ? 'lualatex' : 'xelatex');
+  const useLatexmk = await commandExists('latexmk');
+  
+  let shellCmd = '';
+  if (useLatexmk) {
+    const engineFlag = engine === 'lualatex' ? '-pdflua' : engine === 'xelatex' ? '-pdfxe' : '-pdf';
+    shellCmd = `cd "${cwd}" && latexmk ${engineFlag} -interaction=nonstopmode "${texFile}"`;
+  } else {
+    const cmd = engine === 'pdflatex' ? 'pdflatex' : (engine === 'lualatex' ? 'lualatex' : 'xelatex');
+    shellCmd = `cd "${cwd}" && ${cmd} -interaction=nonstopmode "${texFile}" && ${cmd} -interaction=nonstopmode "${texFile}"`;
+  }
   
   return new Promise((resolve, reject) => {
-    const proc = spawn('sh', ['-c', 
-      `cd "${cwd}" && ${cmd} -shell-escape -interaction=nonstopmode "${texFile}" && ${cmd} -shell-escape -interaction=nonstopmode "${texFile}"`
-    ], { stdio: 'inherit' });
+    const proc = spawn('sh', ['-c', shellCmd], { stdio: 'inherit' });
     
     const timer = setTimeout(() => {
       proc.kill();
@@ -154,7 +161,7 @@ async function buildPDFLocal(
         resolve();
       } else {
         const logErr = await getLatexErrorFromLog(cwd, texFile);
-        reject(new Error(`${cmd} failed with exit code ${code}.\nLaTeX Log Details:\n${logErr}`));
+        reject(new Error(`LaTeX compilation failed with exit code ${code}.\nLaTeX Log Details:\n${logErr}`));
       }
     });
     

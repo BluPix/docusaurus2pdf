@@ -60,6 +60,7 @@ export interface DocPage {
   Content: string;
   Language: string;
   Frontmatter: Record<string, unknown>;
+  RelPath?: string;
 }
 
 // LaTeX language configuration
@@ -152,6 +153,7 @@ export interface LatexGeneratorOptions {
   Language: string;
   Date: string;
   Author?: string;
+  Frontmatter?: Record<string, unknown>;
 }
 
 export interface DocumentSection {

@@ -553,15 +553,23 @@ export class MDXParser {
       const start = lines[i].match(itemRegex);
       if (!start || start[2].toLowerCase() !== 'a') continue;
 
-      // Collect the run of lettered items with the same indentation,
-      // allowing blank lines between items.
       const indent = start[1];
       const runIndices: number[] = [i];
       let j = i + 1;
       while (j < lines.length) {
         if (lines[j].trim() === '') {
-          j++;
-          continue;
+          let k = j;
+          while (k < lines.length && lines[k].trim() === '') {
+            k++;
+          }
+          if (k < lines.length) {
+            const m = lines[k].match(itemRegex);
+            if (m && m[1] === indent) {
+              j = k;
+              continue;
+            }
+          }
+          break;
         }
         const m = lines[j].match(itemRegex);
         if (m && m[1] === indent) {
@@ -576,7 +584,13 @@ export class MDXParser {
         const m = lines[idx].match(itemRegex)!;
         lines[idx] = `${m[1]}1. ${m[3]}`;
       }
-      i = j - 1;
+
+      const firstIdx = runIndices[0];
+      const lastIdx = runIndices[runIndices.length - 1];
+      lines[firstIdx] = `<lettered-list>\n\n${lines[firstIdx]}`;
+      lines[lastIdx] = `${lines[lastIdx]}\n\n</lettered-list>`;
+
+      i = lastIdx;
     }
 
     return lines.join('\n');
@@ -696,10 +710,10 @@ export class MDXParser {
           const braceMatch = meta.match(/\{([^}]+)\}/);
           if (braceMatch) {
             const braceContent = braceMatch[1];
-            if (braceContent.includes(',')) {
-              highlightLines = braceContent;
-            } else if (braceContent.match(/^\d+-\d+$/)) {
+            if (braceContent.match(/^\d+-\d+$/)) {
               lineRange = braceContent;
+            } else {
+              highlightLines = braceContent;
             }
           }
         }
@@ -708,8 +722,16 @@ export class MDXParser {
         if (lineRange) {
           const [start, end] = lineRange.split('-').map(Number);
           const codeLines = code.split('\n');
-          const filteredLines = codeLines.slice(start - 1, end);
-          cleanCode = filteredLines.join('\n');
+          cleanCode = codeLines.slice(start - 1, end).join('\n');
+        }
+
+        const highlightCommentResult = this.parseHighlightComments(cleanCode);
+        cleanCode = highlightCommentResult.cleanCode;
+        let highlightedLines = highlightCommentResult.highlightedLines;
+
+        if (highlightLines) {
+          const metaLines = this.parseMetadataHighlight(highlightLines);
+          highlightedLines = Array.from(new Set([...highlightedLines, ...metaLines])).sort((a, b) => a - b);
         }
 
         const langMap: Record<string, string> = {
@@ -735,6 +757,20 @@ export class MDXParser {
         const langLower = lang.toLowerCase();
         const mappedLang = langLower in langMap ? langMap[langLower] : langLower;
 
+        const codeBody = cleanCode.endsWith('\n') ? cleanCode : `${cleanCode}\n`;
+        const hasNonLatin = /[^\t-\r -ӿḀ-ỿ–—‘-‟…]/u.test(cleanCode);
+        const useVerbatim = highlightedLines.length > 0 || hasNonLatin;
+
+        if (useVerbatim) {
+          const vparams = ['breaklines=true', 'frame=single', 'rulecolor=\\color{black!20}', 'fontsize=\\footnotesize'];
+          if (showLineNumbers) vparams.push('numbers=left');
+          if (highlightedLines.length > 0) {
+            vparams.push(`highlightlines={${this.formatHighlightLines(highlightedLines)}}`);
+          }
+          const titleStr = blockTitle ? `\\noindent\\textbf{${this.escapeLatex(blockTitle)}}\\\\*\\vspace{-0.5em}\n` : '';
+          return `${titleStr}\\begin{Verbatim}[${vparams.join(',')}]\n${codeBody}\\end{Verbatim}`;
+        }
+
         const params: string[] = [];
         if (mappedLang && supportedListingsLangs.has(mappedLang)) {
           params.push(`language=${mappedLang}`);
@@ -743,36 +779,12 @@ export class MDXParser {
         if (showLineNumbers) {
           params.push('numbers=left');
         }
-        // Docusaurus line-highlight metadata ({1,3-5}) has no listings
-        // equivalent; the lines render unhighlighted rather than failing
-        // the compile with an unknown key.
+
         if (blockTitle) {
-          // listings treats [...] inside caption= as its short-caption
-          // syntax; brace-group the brackets to keep them literal
           const safeTitle = this.escapeLatex(blockTitle)
             .replace(/\[/g, '{[}')
             .replace(/\]/g, '{]}');
           params.push(`caption={${safeTitle}}`);
-        }
-
-        cleanCode = cleanCode
-          .replace(/^\s*\/\/\s*highlight-next-line\s*$/gm, '')
-          .replace(/^\s*\/\/\s*highlight-start[\s\S]*?\/\/\s*highlight-end\s*$/gm, '')
-          .replace(/\/\*\s*highlight-next-line\s*\*\//g, '')
-          .replace(/\/\*\s*highlight-start[\s\S]*?\*\/\s*\/\*\s*highlight-end\s*\*\//g, '')
-          .replace(/\{#\s*highlight-next-line\s*\}/g, '')
-          .replace(/\{#\s*highlight-start[\s\S]*?\{#\s*highlight-end\s*\}/g, '');
-
-        const codeBody = cleanCode.endsWith('\n') ? cleanCode : `${cleanCode}\n`;
-
-        // listings mishandles characters beyond Latin scripts (box-drawing
-        // trees, arrows, emoji) under LuaLaTeX - line layout falls apart.
-        // Such blocks go through fvextra's Verbatim, which is Unicode-clean
-        // (at the cost of syntax highlighting).
-        if (/[^\t-\r -ӿḀ-ỿ–—‘-‟…]/u.test(cleanCode)) {
-          const vparams = ['breaklines=true', 'frame=single', 'rulecolor=\\color{black!20}', 'fontsize=\\footnotesize'];
-          if (showLineNumbers) vparams.push('numbers=left');
-          return `\\begin{Verbatim}[${vparams.join(',')}]\n${codeBody}\\end{Verbatim}`;
         }
 
         const paramsStr = params.length > 0 ? `[${params.join(',')}]` : '';
@@ -802,9 +814,15 @@ export class MDXParser {
       }
 
       case 'list': {
-        const listType = node.ordered ? 'enumerate' : 'itemize';
-        // depth + 1: page-breaking environments (longtable) cannot nest here
+        const isLettered = node.parent &&
+          (node.parent.type === 'mdxJsxFlowElement' || node.parent.type === 'html' || node.parent.type === 'mdxJsxTextElement') &&
+          node.parent.name === 'lettered-list';
+        
         const body = compileChildren(node.children, node, depth + 1).join('\n');
+        if (isLettered) {
+          return `\\begin{enumerate}[label=\\alph*)]\n${body}\n\\end{enumerate}`;
+        }
+        const listType = node.ordered ? 'enumerate' : 'itemize';
         return `\\begin{${listType}}\n${body}\n\\end{${listType}}`;
       }
 
@@ -1000,6 +1018,9 @@ export class MDXParser {
         if (elName === 'br') {
           return '\\\\';
         }
+        if (elName === 'lettered-list') {
+          return compileChildren(node.children, node, depth).join('\n');
+        }
         if (elName === 'strong' || elName === 'b') {
           return `\\textbf{${compileChildren(node.children, node, depth).join('')}}`;
         }
@@ -1049,6 +1070,57 @@ export class MDXParser {
         if (elName === 'center') {
           return `\\begin{center}\n${compileChildren(node.children, node, depth).join('\n\n')}\n\\end{center}`;
         }
+        if (elName === 'Admonition') {
+          const type = this.getJsxAttr(node, 'type') || 'info';
+          const title = this.getJsxAttr(node, 'title') || '';
+          
+          let titleText = title ? String(title) : type.charAt(0).toUpperCase() + type.slice(1);
+          let color = 'blue';
+          let icon = '\\faInfoCircle';
+          
+          if (type === 'tip') {
+            color = 'green';
+            icon = '\\faLightbulb';
+          } else if (type === 'warning') {
+            color = 'orange';
+            icon = '\\faExclamationTriangle';
+          } else if (type === 'danger') {
+            color = 'red';
+            icon = '\\faTimesCircle';
+          } else if (type === 'note') {
+            color = 'gray';
+            icon = '\\faEdit';
+          }
+
+          let summaryText = titleText;
+          let contentChildren = node.children;
+          let summaryNode: any = null;
+          let summaryParent: any = null;
+
+          for (const c of node.children) {
+            if (c.type === 'mdxJsxFlowElement' && c.name === 'summary') {
+              summaryNode = c;
+              break;
+            }
+            if (c.children && c.children.length > 0) {
+              for (const inner of c.children) {
+                if (inner.type === 'mdxJsxFlowElement' && inner.name === 'summary') {
+                  summaryNode = inner;
+                  summaryParent = c;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (summaryNode) {
+            summaryText = getPlainText(summaryNode).trim();
+            contentChildren = node.children.filter((c: any) => c !== summaryNode && c !== summaryParent);
+          }
+
+          const body = compileChildren(contentChildren, node, depth + 1).join('\n\n');
+          return `\\begin{tcolorbox}[breakable,title={${icon} ${this.escapeLatex(summaryText)},colback=${color}!5!white,colframe=${color}!75!black,sharp corners,boxrule=0.5pt}]\n${body}\n\\end{tcolorbox}`;
+        }
         if (elName === 'video' || elName === 'iframe' || elName === 'audio') {
           const src = this.getJsxAttr(node, 'src') || '';
           const kind = elName.charAt(0).toUpperCase() + elName.slice(1);
@@ -1087,7 +1159,7 @@ export class MDXParser {
         if (elName === 'TabItem') {
           const label = this.getJsxAttr(node, 'label') || this.getJsxAttr(node, 'value') || '';
           const body = compileChildren(node.children, node, depth).join('\n\n');
-          return `\\textbf{${this.escapeLatex(String(label))}:} ${body}`;
+          return `\\begin{tcolorbox}[breakable,title={${this.escapeLatex(String(label))}},colback=black!2!white,colframe=black!30!white,boxrule=0.5pt,arc=1.5pt,coltitle=black,fonttitle=\\bfseries]\n${body}\n\\end{tcolorbox}`;
         }
         if (elName === 'DocCardList') {
           const itemsAttr = node.attributes?.find((a: any) => a.name === 'items');
@@ -1405,6 +1477,98 @@ export class MDXParser {
       escaped = applyVlna(escaped);
     }
     return escaped;
+  }
+
+  private parseHighlightComments(code: string): { cleanCode: string; highlightedLines: number[] } {
+    const lines = code.split('\n');
+    const cleanLines: string[] = [];
+    const highlightedLines: number[] = [];
+    let highlightActive = false;
+    let highlightNext = false;
+
+    const nextRegex = /(?:\/\/|#|<!--|\/\*)\s*highlight-next-line\s*(?:-->|\*\/)?/;
+    const startRegex = /(?:\/\/|#|<!--|\/\*)\s*highlight-start\s*(?:-->|\*\/)?/;
+    const endRegex = /(?:\/\/|#|<!--|\/\*)\s*highlight-end\s*(?:-->|\*\/)?/;
+
+    for (const line of lines) {
+      if (nextRegex.test(line)) {
+        highlightNext = true;
+        continue;
+      }
+      if (startRegex.test(line)) {
+        highlightActive = true;
+        continue;
+      }
+      if (endRegex.test(line)) {
+        highlightActive = false;
+        continue;
+      }
+
+      cleanLines.push(line);
+      const lineIndex = cleanLines.length;
+
+      if (highlightNext) {
+        highlightedLines.push(lineIndex);
+        highlightNext = false;
+      } else if (highlightActive) {
+        highlightedLines.push(lineIndex);
+      }
+    }
+
+    return {
+      cleanCode: cleanLines.join('\n'),
+      highlightedLines,
+    };
+  }
+
+  private parseMetadataHighlight(spec: string): number[] {
+    const lines: number[] = [];
+    const parts = spec.split(',');
+    for (const part of parts) {
+      if (part.includes('-')) {
+        const [start, end] = part.split('-').map(Number);
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = start; i <= end; i++) {
+            lines.push(i);
+          }
+        }
+      } else {
+        const num = Number(part);
+        if (!isNaN(num)) {
+          lines.push(num);
+        }
+      }
+    }
+    return lines;
+  }
+
+  private formatHighlightLines(lines: number[]): string {
+    if (lines.length === 0) return '';
+    const parts: string[] = [];
+    let start = lines[0];
+    let end = lines[0];
+
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === end + 1) {
+        end = lines[i];
+      } else {
+        if (start === end) {
+          parts.push(`${start}`);
+        } else {
+          parts.push(`${start}-${end}`);
+        }
+        start = lines[i];
+        end = lines[i];
+      }
+    }
+
+    if (start === end) {
+      parts.push(`${start}`);
+    } else {
+      parts.push(`${start}-${end}`);
+    }
+
+    return parts.join(',');
   }
 
   private extractFrontmatter(source: string): { content: string; frontmatter: Record<string, unknown> } {

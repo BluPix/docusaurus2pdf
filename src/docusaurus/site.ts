@@ -257,6 +257,7 @@ export class SiteLoader {
     const docsDir = site.DocsDir;
 
     try {
+      // Load default language documents
       const files = (await glob('**/*.{md,mdx}', { cwd: docsDir })).sort();
 
       for (const file of files) {
@@ -290,9 +291,74 @@ export class SiteLoader {
           Content: content,
           Language: this.defaultLocale,
           Frontmatter: frontmatter,
+          RelPath: relPosix,
         };
 
         site.Pages.push(page);
+      }
+
+      // Load translated documents from i18n directory
+      const i18nDir = path.join(site.Root, 'i18n');
+      try {
+        const i18nExists = await fs.access(i18nDir).then(() => true).catch(() => false);
+        if (i18nExists) {
+          const locales = await fs.readdir(i18nDir);
+          for (const locale of locales) {
+            if (locale.startsWith('.')) continue;
+
+            const localeDocsDirs = [
+              path.join(i18nDir, locale, 'docusaurus-plugin-content-docs', 'current'),
+              path.join(i18nDir, locale, 'docusaurus-plugin-content-docs')
+            ];
+
+            let localeDocsDir = '';
+            for (const dir of localeDocsDirs) {
+              try {
+                await fs.access(dir);
+                localeDocsDir = dir;
+                break;
+              } catch {}
+            }
+
+            if (!localeDocsDir) continue;
+
+            const localeFiles = (await glob('**/*.{md,mdx}', { cwd: localeDocsDir })).sort();
+            for (const file of localeFiles) {
+              const relPosix = file.split(path.sep).join('/');
+
+              if (relPosix.split('/').some((seg) => seg.startsWith('_'))) {
+                continue;
+              }
+
+              const fullPath = path.join(localeDocsDir, file);
+              const content = await fs.readFile(fullPath, 'utf-8');
+              const frontmatter = this.extractFrontmatter(content);
+
+              if (frontmatter.draft === true || frontmatter.unlisted === true) {
+                continue;
+              }
+
+              const pathId = relPosix.replace(/\.mdx?$/, '');
+              const id = typeof frontmatter.id === 'string'
+                ? [...pathId.split('/').slice(0, -1), frontmatter.id].join('/')
+                : pathId;
+
+              const page: DocPage = {
+                Path: fullPath,
+                ID: id,
+                Title: this.extractTitle(content),
+                Content: content,
+                Language: locale,
+                Frontmatter: frontmatter,
+                RelPath: relPosix,
+              };
+
+              site.Pages.push(page);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error loading i18n pages:', err);
       }
     } catch (err) {
       console.error('Error loading pages from directory:', err);
@@ -413,12 +479,40 @@ export class SiteLoader {
   async getDocsByLanguage(site: Site): Promise<Map<string, DocPage[]>> {
     const grouped = new Map<string, DocPage[]>();
     
+    const langs = new Set<string>();
     for (const page of site.Pages) {
-      const lang = this.detectLanguage(page);
-      if (!grouped.has(lang)) {
-        grouped.set(lang, []);
+      langs.add(this.detectLanguage(page));
+    }
+    
+    const defaultLang = this.defaultLocale || 'en';
+    const defaultDocs = site.Pages.filter(p => this.detectLanguage(p) === defaultLang);
+    
+    for (const lang of langs) {
+      if (lang === defaultLang) {
+        grouped.set(lang, defaultDocs);
+        continue;
       }
-      grouped.get(lang)!.push(page);
+      
+      const langDocs = site.Pages.filter(p => this.detectLanguage(p) === lang);
+      const langDocsMap = new Map(langDocs.map(d => [d.ID, d]));
+      
+      const merged: DocPage[] = [];
+      for (const defDoc of defaultDocs) {
+        if (langDocsMap.has(defDoc.ID)) {
+          merged.push(langDocsMap.get(defDoc.ID)!);
+        } else {
+          merged.push(defDoc);
+        }
+      }
+      
+      const defDocsIds = new Set(defaultDocs.map(d => d.ID));
+      for (const langDoc of langDocs) {
+        if (!defDocsIds.has(langDoc.ID)) {
+          merged.push(langDoc);
+        }
+      }
+      
+      grouped.set(lang, merged);
     }
     
     return grouped;

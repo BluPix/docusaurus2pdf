@@ -9,13 +9,13 @@ Convert Docusaurus documentation sites to high-quality PDF with full MDX support
 ## Features
 
 - **Full MDX Support** - Parses all Docusaurus components including DocCardList, Details, Admonitions, Tabs
-- **LaTeX-based PDF Generation** - Uses LaTeX for professional-quality PDF output with proper typography
+- **LaTeX-based PDF Generation** - Uses LaTeX (`latexmk` by default) for professional-quality PDF output with proper typography
+- **Multilingual & i18n** - Automatically reads translations from `i18n/` directory and merges with fallbacks
+- **Line Highlighting** - Supports code block metadata `{1,3-5}` and comments (e.g. `// highlight-next-line`) using `fvextra`
 - **Math Equations** - Supports inline `$...$` and block `$$...$$` LaTeX math equations
-- **Mermaid Diagrams** - Converts Mermaid diagrams to PNG using mmdc CLI
-- **PlantUML Integration** - Generates vector (SVG/EPS) or high-resolution PNG diagrams (up to 600 DPI)
-- **Code Block Options** - Supports `title="file.js"` and `showLineNumbers` attributes
-- **Emoji Rendering** - LuaLaTeX renders emojis in black & white using Twemoji Mozilla font
-- **Multilingual** - Supports English, Czech, Slovak, and other UTF-8 languages
+- **Mermaid & PlantUML** - Automatically generates high-quality diagrams with source code fallbacks if skipped or failed
+- **Lettered Lists** - Natively compiles `a. b. c.` lists using `enumitem`
+- **Emoji Rendering** - LuaLaTeX renders emojis using Twemoji Mozilla font
 - **Section Filtering** - Generate PDFs for specific sidebar sections only
 - **Docker-based LaTeX** - No local LaTeX installation required
 - **Multiple Output Modes** - Per-language, per-section, or single PDF
@@ -155,11 +155,11 @@ module.exports = {
 | `DocCardList` | `\begin{itemize} ... \end{itemize}` |
 | `DocCard` | Bold text with optional description |
 | `Details` | `tcolorbox` with title |
-| Admonitions (`:::tip`, etc.) | Colored `tcolorbox` |
-| Tabs (`<Tabs><TabItem>`) | Sequential content with bold labels |
+| Admonitions (`:::tip`, etc.) | Colored `tcolorbox` with custom icons |
+| Tabs (`<Tabs><TabItem>`) | Styled `tcolorbox` card per tab |
 | Math Equations (`$...$`, `$$...$$`) | Inline math or display math blocks |
-| Mermaid Diagrams | `\includesvg{img/mermaid_hash.svg}` |
-| Code Blocks (`title`, `showLineNumbers`) | `\begin{lstlisting}[caption=...,numbers=left]` |
+| Mermaid / PlantUML | PDF/EPS vector graphic (or source code fallback if skipped/failed) |
+| Code Blocks (`title`, `showLineNumbers`, highlights) | `Verbatim` with `highlightlines` (via `fvextra`) or `lstlisting` (via `listings`) |
 | Emojis (LuaLaTeX) | `\emoji{name}` with Twemoji font |
 
 ## Requirements

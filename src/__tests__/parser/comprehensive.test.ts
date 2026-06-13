@@ -32,11 +32,12 @@ describe('MDXParser Comprehensive Tests', () => {
       expect(result.Content).toContain('numbers=left');
     });
 
-    it.skip('removes highlight-next-line comments', async () => {
-      // Known issue: highlight comments not removed when code block has no options
+    it('removes highlight-next-line comments and highlights', async () => {
       const input = '# Test\n\n```js\nconst x = 1;\n// highlight-next-line\nconst y = 2;\n```';
       const result = await parser.parse(input);
       expect(result.Content).not.toContain('highlight-next-line');
+      expect(result.Content).toContain('highlightlines={2}');
+      expect(result.Content).toContain('\\begin{Verbatim}');
     });
   });
 
@@ -129,16 +130,16 @@ describe('MDXParser Comprehensive Tests', () => {
       expect(result.Content).toContain('Click to expand');
     });
 
-    it('converts <Tabs><TabItem> to sequential content', async () => {
-      const input = `# Test
-
+    it('converts <Tabs><TabItem> to tcolorbox', async () => {
+      const input = `
 <Tabs>
 <TabItem value="a" label="Android">Install on Android</TabItem>
 <TabItem value="i" label="iOS">Install on iOS</TabItem>
 </Tabs>`;
       const result = await parser.parse(input);
-      expect(result.Content).toContain('\\textbf{Android:}');
-      expect(result.Content).toContain('\\textbf{iOS:}');
+      expect(result.Content).toContain('\\begin{tcolorbox}');
+      expect(result.Content).toContain('title={Android}');
+      expect(result.Content).toContain('title={iOS}');
     });
   });
 
@@ -285,6 +286,7 @@ describe('MDXParser Comprehensive Tests', () => {
       const result = await parser.parse(input);
       const enumerateCount = (result.Content.match(/\\begin\{enumerate\}/g) || []).length;
       expect(enumerateCount).toBe(1);
+      expect(result.Content).toContain('\\begin{enumerate}[label=\\alph*)]');
       expect(result.Content).toContain('\\item First item');
       expect(result.Content).toContain('\\item Second item');
       expect(result.Content).toContain('\\item Third item');
@@ -293,7 +295,7 @@ describe('MDXParser Comprehensive Tests', () => {
     it('converts lettered lists with period (a., b., c.) to enumerate', async () => {
       const input = '# Test\n\na. Item A\nb. Item B';
       const result = await parser.parse(input);
-      expect(result.Content).toContain('\\begin{enumerate}');
+      expect(result.Content).toContain('\\begin{enumerate}[label=\\alph*)]');
       expect(result.Content).toContain('\\item Item A');
       expect(result.Content).toContain('\\item Item B');
     });
@@ -340,9 +342,8 @@ describe('MDXParser Comprehensive Tests', () => {
     it('supports line highlighting syntax', async () => {
       const input = '# Test\n\n```js {1-3,5}\nconst a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\n```';
       const result = await parser.parse(input);
-      // Line-highlight metadata has no listings equivalent; it must be
-      // dropped without breaking the compile (highlightlines is not a key)
-      expect(result.Content).not.toContain('highlightlines');
+      expect(result.Content).toContain('highlightlines={1-3,5}');
+      expect(result.Content).toContain('\\begin{Verbatim}');
       expect(result.Content).toContain('const a = 1;');
     });
   });
@@ -465,6 +466,14 @@ describe('MDXParser Comprehensive Tests', () => {
       const input = '# Test\n\nLine 1<br>Line 2';
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\\\');
+    });
+
+    it('converts <dl><dt><dd> HTML tags to description environment', async () => {
+      const input = '# Test\n\n<dl>\n<dt>Term 1</dt>\n<dd>Definition 1</dd>\n<dt>Term 2</dt>\n<dd>Definition 2</dd>\n</dl>';
+      const result = await parser.parse(input);
+      expect(result.Content).toContain('\\begin{description}');
+      expect(result.Content).toContain('\\item[Term 1]\n Definition 1');
+      expect(result.Content).toContain('\\item[Term 2]\n Definition 2');
     });
   });
 

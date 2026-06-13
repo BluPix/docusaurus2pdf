@@ -67,6 +67,7 @@ export function getCommonPackages(): PackageSet {
     packages: [
       '\\usepackage{geometry}',
       '\\geometry{margin=2.5cm}',
+      '\\usepackage{enumitem}',
       '\\usepackage{amsmath}', // \\text, align/gather, matrices (KaTeX parity)
       '\\usepackage{xcolor}',
       '\\usepackage[hidelinks]{hyperref}', // Completely hide link borders and colors

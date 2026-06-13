@@ -57,11 +57,18 @@ export class Renderer {
     const texFile = path.join(this.opts.OutputDir, 'documentation.tex');
     
     const projectTitle = site.Config?.Title || 'Documentation';
+    const firstDoc = entries.find(e => e.Type === 'doc' && e.Doc)?.Doc;
+    const frontmatter = firstDoc?.Frontmatter || {};
+    const author = String(frontmatter.author || site.Config?.Tagline || '');
+    const date = String(frontmatter.date || '');
+
     const generator = new LatexGenerator({
       Engine: this.opts.Engine,
       Title: projectTitle,
       Language: lang,
-      Date: '', // No date on title page
+      Date: date,
+      Author: author,
+      Frontmatter: frontmatter,
     });
 
     await generator.generateDocument(texFile, sections);
@@ -107,11 +114,18 @@ export class Renderer {
       const texFile = path.join(this.opts.OutputDir, `documentation_${lang}.tex`);
       
       const projectTitle = site.Config?.Title || 'Documentation';
+      const firstDoc = entries.find(e => e.Type === 'doc' && e.Doc)?.Doc;
+      const frontmatter = firstDoc?.Frontmatter || {};
+      const author = String(frontmatter.author || site.Config?.Tagline || '');
+      const date = String(frontmatter.date || '');
+
       const generator = new LatexGenerator({
         Engine: this.opts.Engine,
         Title: projectTitle,
         Language: lang,
-        Date: '', // No date on title page
+        Date: date,
+        Author: author,
+        Frontmatter: frontmatter,
       });
       
       await generator.generateDocument(texFile, sections);
@@ -146,11 +160,18 @@ export class Renderer {
       const texFile = path.join(this.opts.OutputDir, `${safeName}.tex`);
       
       const projectTitle = site.Config?.Title || 'Documentation';
+      const firstDoc = docs[0];
+      const frontmatter = firstDoc?.Frontmatter || {};
+      const author = String(frontmatter.author || site.Config?.Tagline || '');
+      const date = String(frontmatter.date || '');
+
       const generator = new LatexGenerator({
         Engine: this.opts.Engine,
         Title: `${projectTitle} - ${category.Label}`,
         Language: sectionLang,
-        Date: '', // No date on title page
+        Date: date,
+        Author: author,
+        Frontmatter: frontmatter,
       });
       
       await generator.generateDocument(texFile, sections);
@@ -167,9 +188,8 @@ export class Renderer {
     const sections: DocumentSection[] = [];
 
     const docKey = (doc: DocPage): string => {
-      if (!docsDir) return '';
-      const rel = path.relative(docsDir, doc.Path).split(path.sep).join('/');
-      return rel.startsWith('..') ? '' : MDXParser.canonicalDocKey(rel);
+      const rel = doc.RelPath || (docsDir ? path.relative(docsDir, doc.Path).split(path.sep).join('/') : '');
+      return rel.startsWith('..') || !rel ? '' : MDXParser.canonicalDocKey(rel);
     };
 
     // Registry of all docs in this build so cross-document links can be
@@ -193,7 +213,10 @@ export class Renderer {
       try {
         const content = await fs.readFile(doc.Path, 'utf-8');
         let docDir = '';
-        if (docsDir) {
+        if (doc.RelPath) {
+          const dir = path.dirname(doc.RelPath).split(path.sep).join('/');
+          docDir = dir === '.' ? '' : dir;
+        } else if (docsDir) {
           const rel = path.relative(docsDir, path.dirname(doc.Path)).split(path.sep).join('/');
           docDir = rel.startsWith('..') ? '' : rel;
         }
@@ -241,6 +264,30 @@ export class Renderer {
     // are unique and references always match the copied files.
     await this.copyImageTree(site.DocsDir, '');
     await this.copyImageTree(path.join(site.Root, 'static'), 'static');
+
+    // Copy images from i18n locales if they exist
+    const i18nDir = path.join(site.Root, 'i18n');
+    try {
+      const i18nExists = await fs.access(i18nDir).then(() => true).catch(() => false);
+      if (i18nExists) {
+        const locales = await fs.readdir(i18nDir);
+        for (const locale of locales) {
+          if (locale.startsWith('.')) continue;
+
+          const localeDocsDirs = [
+            path.join(i18nDir, locale, 'docusaurus-plugin-content-docs', 'current'),
+            path.join(i18nDir, locale, 'docusaurus-plugin-content-docs')
+          ];
+
+          for (const dir of localeDocsDirs) {
+            try {
+              await fs.access(dir);
+              await this.copyImageTree(dir, '');
+            } catch {}
+          }
+        }
+      }
+    } catch {}
 
     // Fonts and data files keep their original basenames
     const assetTypes = [
@@ -359,7 +406,19 @@ export class Renderer {
   }
 
   async generatePlantUMLDiagrams(sections: DocumentSection[]): Promise<void> {
-    if (this.opts.SkipDiagrams) return;
+    if (this.opts.SkipDiagrams) {
+      for (const section of sections) {
+        if (section.PlantUMLDiagrams) {
+          for (const diagram of section.PlantUMLDiagrams) {
+            const placeholder = `\\begin{center}\\docimage[width=0.8\\textwidth]{img/plantuml_${diagram.hash}.eps}\\end{center}`;
+            const fallback = `\\begin{lstlisting}[escapechar=,caption={PlantUML Diagram (Skipped)}]\n${diagram.code.trim()}\n\\end{lstlisting}`;
+            section.Content = section.Content.replace(placeholder, fallback);
+          }
+        }
+      }
+      return;
+    }
+    
     // Collect all unique PlantUML diagrams
     const allDiagrams = new Map<string, string>();
     for (const section of sections) {
@@ -374,11 +433,28 @@ export class Renderer {
     
     console.log(`Generating ${allDiagrams.size} PlantUML diagram(s)...`);
     
+    const failedHashes = new Set<string>();
     for (const [hash, code] of allDiagrams) {
       try {
         await this.generatePlantUMLImage(hash, code);
       } catch (err) {
         console.error(`Failed to generate PlantUML diagram ${hash}:`, err);
+        failedHashes.add(hash);
+      }
+    }
+
+    // Replace failed diagrams in section contents
+    if (failedHashes.size > 0) {
+      for (const section of sections) {
+        if (section.PlantUMLDiagrams) {
+          for (const diagram of section.PlantUMLDiagrams) {
+            if (failedHashes.has(diagram.hash)) {
+              const placeholder = `\\begin{center}\\docimage[width=0.8\\textwidth]{img/plantuml_${diagram.hash}.eps}\\end{center}`;
+              const fallback = `\\begin{lstlisting}[escapechar=,caption={PlantUML Diagram (Generation Failed)}]\n${diagram.code.trim()}\n\\end{lstlisting}`;
+              section.Content = section.Content.replace(placeholder, fallback);
+            }
+          }
+        }
       }
     }
   }
@@ -585,7 +661,19 @@ skinparam packageFontName Serif
   }
 
   async generateMermaidDiagrams(sections: DocumentSection[]): Promise<void> {
-    if (this.opts.SkipDiagrams) return;
+    if (this.opts.SkipDiagrams) {
+      for (const section of sections) {
+        if (section.MermaidDiagrams) {
+          for (const diagram of section.MermaidDiagrams) {
+            const placeholder = `\\begin{center}\\docimage[width=0.8\\textwidth]{img/mermaid_${diagram.hash}.pdf}\\end{center}`;
+            const fallback = `\\begin{lstlisting}[escapechar=,caption={Mermaid Diagram (Skipped)}]\n${diagram.code.trim()}\n\\end{lstlisting}`;
+            section.Content = section.Content.replace(placeholder, fallback);
+          }
+        }
+      }
+      return;
+    }
+    
     // Collect all unique Mermaid diagrams
     const allDiagrams = new Map<string, string>();
     for (const section of sections) {
@@ -599,12 +687,29 @@ skinparam packageFontName Serif
     if (allDiagrams.size === 0) return;
     
     console.log(`Generating ${allDiagrams.size} Mermaid diagram(s)...`);
-
+    
+    const failedHashes = new Set<string>();
     for (const [hash, code] of allDiagrams) {
       try {
         await this.generateMermaidImage(hash, code);
       } catch (err) {
         console.error(`Failed to generate Mermaid diagram ${hash}:`, err);
+        failedHashes.add(hash);
+      }
+    }
+
+    // Replace failed diagrams in section contents
+    if (failedHashes.size > 0) {
+      for (const section of sections) {
+        if (section.MermaidDiagrams) {
+          for (const diagram of section.MermaidDiagrams) {
+            if (failedHashes.has(diagram.hash)) {
+              const placeholder = `\\begin{center}\\docimage[width=0.8\\textwidth]{img/mermaid_${diagram.hash}.pdf}\\end{center}`;
+              const fallback = `\\begin{lstlisting}[escapechar=,caption={Mermaid Diagram (Generation Failed)}]\n${diagram.code.trim()}\n\\end{lstlisting}`;
+              section.Content = section.Content.replace(placeholder, fallback);
+            }
+          }
+        }
       }
     }
   }
