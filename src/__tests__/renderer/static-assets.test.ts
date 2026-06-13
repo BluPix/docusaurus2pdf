@@ -156,4 +156,36 @@ describe('Renderer Static Assets', () => {
     expect(files).toContain('diagram.pdf');
     expect(files).not.toContain('diagram.svg'); // Original SVG should not be copied
   });
+
+  it('renders Mermaid and PlantUML diagrams as code block fallbacks when SkipDiagrams is enabled', async () => {
+    const skipRenderer = new Renderer({
+      OutputDir: outputDir,
+      Engine: 'lualatex',
+      SkipDiagrams: true,
+    });
+
+    const sections = [
+      {
+        Title: 'Section 1',
+        Content: 'Text\n\\begin{center}\\docimage[width=0.8\\textwidth]{img/mermaid_123.pdf}\\end{center}\nMore Text\n\\begin{center}\\docimage[width=0.8\\textwidth]{img/plantuml_456.eps}\\end{center}',
+        Level: 1,
+        MermaidDiagrams: [{ hash: '123', code: 'graph TD; A-->B;' }],
+        PlantUMLDiagrams: [{ hash: '456', code: '@startuml\nclass A\n@enduml' }],
+      }
+    ];
+
+    await skipRenderer.generateMermaidDiagrams(sections);
+    await skipRenderer.generatePlantUMLDiagrams(sections);
+
+    const content = sections[0].Content;
+    
+    // Check that placeholders were replaced with code fallbacks
+    expect(content).not.toContain('img/mermaid_123.pdf');
+    expect(content).not.toContain('img/plantuml_456.eps');
+
+    expect(content).toContain('\\begin{lstlisting}[escapechar=,caption={Mermaid Diagram (Skipped)}]');
+    expect(content).toContain('graph TD; A-->B;');
+    expect(content).toContain('\\begin{lstlisting}[escapechar=,caption={PlantUML Diagram (Skipped)}]');
+    expect(content).toContain('@startuml\nclass A\n@enduml');
+  });
 });

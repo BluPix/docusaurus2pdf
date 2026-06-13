@@ -1,6 +1,13 @@
 {
-  "name": "docusaurus2pdf",
+  "name": "@blupix/docusaurus2pdf",
   "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BluPix/docusaurus2pdf.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "description": "Convert Docusaurus docs to PDF with full MDX support",
   "type": "module",
   "main": "dist/index.js",

@@ -52,4 +52,20 @@ describe('i18n loading and fallback', () => {
     const csConfiguration = csDocs.find(d => d.ID === 'getting-started/configuration')!;
     expect(csConfiguration.Language).toBe('en');
   });
+
+  it('detects language from path and frontmatter', () => {
+    const loader = new SiteLoader() as any;
+    
+    const pageWithPath = {
+      Path: '/project/i18n/de/docusaurus-plugin-content-docs/current/intro.md',
+      Frontmatter: {},
+    } as any;
+    expect(loader.detectLanguage(pageWithPath)).toBe('de');
+
+    const pageWithFrontmatter = {
+      Path: '/project/docs/intro.md',
+      Frontmatter: { locale: 'fr' },
+    } as any;
+    expect(loader.detectLanguage(pageWithFrontmatter)).toBe('fr');
+  });
 });

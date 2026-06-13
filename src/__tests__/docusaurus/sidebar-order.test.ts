@@ -41,4 +41,21 @@ describe('Sidebar ordering and hierarchy', () => {
       expect(page.Frontmatter.draft).not.toBe(true);
     }
   });
+
+  it('getDocsForCategory filters and orders docs correctly', async () => {
+    const loader = new SiteLoader();
+    const site = await loader.load(exampleSite);
+    
+    // Find the 'Getting Started' category
+    const category = site.Sidebars[0].Items.find(
+      (item) => item.Type === 'category' && item.Label === 'Getting Started'
+    ) as any;
+    expect(category).toBeDefined();
+    
+    const docs = await loader.getDocsForCategory(site, category);
+    expect(docs.length).toBe(3); // installation, configuration, first-steps
+    expect(docs[0].ID).toBe('getting-started/installation');
+    expect(docs[1].ID).toBe('getting-started/configuration');
+    expect(docs[2].ID).toBe('getting-started/first-steps');
+  });
 });

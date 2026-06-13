@@ -39,6 +39,27 @@ describe('MDXParser Comprehensive Tests', () => {
       expect(result.Content).toContain('highlightlines={2}');
       expect(result.Content).toContain('\\begin{Verbatim}');
     });
+
+    it('removes highlight-start and highlight-end comments and highlights the block', async () => {
+      const input = '# Test\n\n```js\nconst a = 1;\n// highlight-start\nconst b = 2;\nconst c = 3;\n// highlight-end\nconst d = 4;\n```';
+      const result = await parser.parse(input);
+      expect(result.Content).not.toContain('highlight-start');
+      expect(result.Content).not.toContain('highlight-end');
+      expect(result.Content).toContain('highlightlines={2-3}');
+      expect(result.Content).toContain('\\begin{Verbatim}');
+    });
+
+    it('supports alternative comment highlight syntax (python and html comments)', async () => {
+      const pyInput = '# Test\n\n```python\n# highlight-next-line\nx = 1\n```';
+      const pyResult = await parser.parse(pyInput);
+      expect(pyResult.Content).not.toContain('highlight-next-line');
+      expect(pyResult.Content).toContain('highlightlines={1}');
+
+      const htmlInput = '# Test\n\n```html\n<!-- highlight-next-line -->\n<div>Test</div>\n```';
+      const htmlResult = await parser.parse(htmlInput);
+      expect(htmlResult.Content).not.toContain('highlight-next-line');
+      expect(htmlResult.Content).toContain('highlightlines={1}');
+    });
   });
 
   // ==================== MATH EQUATIONS ====================
@@ -231,6 +252,15 @@ describe('MDXParser Comprehensive Tests', () => {
       const input = '# Test\n\nUse `const x = 1`';
       const result = await parser.parse(input);
       expect(result.Content).toContain('\\texttt{const x = 1}');
+    });
+
+    it('converts markdown blockquotes to quote environment with italics', async () => {
+      const input = '# Test\n\n> This is a quote.\n> It has multiple lines.';
+      const result = await parser.parse(input);
+      expect(result.Content).toContain('\\begin{quote}\\itshape');
+      expect(result.Content).toContain('This is a quote.');
+      expect(result.Content).toContain('It has multiple lines.');
+      expect(result.Content).toContain('\\end{quote}');
     });
   });
 
@@ -474,6 +504,31 @@ describe('MDXParser Comprehensive Tests', () => {
       expect(result.Content).toContain('\\begin{description}');
       expect(result.Content).toContain('\\item[Term 1]\n Definition 1');
       expect(result.Content).toContain('\\item[Term 2]\n Definition 2');
+    });
+
+    it('converts JSX <Admonition> component', async () => {
+      const input = '# Test\n\n<Admonition type="tip" title="Tip Title">\nThis is a tip.\n</Admonition>';
+      const result = await parser.parse(input);
+      expect(result.Content).toContain('\\begin{tcolorbox}');
+      expect(result.Content).toContain('title={\\faLightbulb Tip Title');
+      expect(result.Content).toContain('colback=green!5!white');
+      expect(result.Content).toContain('This is a tip.');
+    });
+
+    it('converts JSX <iframe>, <video>, and <audio> elements', async () => {
+      const input = '# Test\n\n<video src="video.mp4" />\n\n<iframe src="https://example.com" />\n\n<audio src="audio.mp3" />';
+      const result = await parser.parse(input);
+      expect(result.Content).toContain('\\textit{[Video: \\hyperref[doc:video.mp4]{video.mp4}]}');
+      expect(result.Content).toContain('\\textit{[Iframe: \\href{https://example.com}{https://example.com}]}');
+      expect(result.Content).toContain('\\textit{[Audio: \\hyperref[doc:audio.mp3]{audio.mp3}]}');
+    });
+
+    it('converts JSX <DocCardList> and <DocCard> components', async () => {
+      const input = '# Test\n\n<DocCardList items="[{\'label\':\'API Reference\'}]" />\n\n<DocCard label="Setup" description="Get started" />';
+      const result = await parser.parse(input);
+      expect(result.Content).toContain('\\begin{itemize}');
+      expect(result.Content).toContain('\\item API Reference');
+      expect(result.Content).toContain('\\textbf{Setup} - Get started');
     });
   });
 
