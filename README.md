@@ -23,19 +23,26 @@ Convert Docusaurus documentation sites to high-quality PDF with full MDX support
 ## Quick Start
 
 ```bash
-# Install
-npm install
-npm run build
+# Install globally from GitHub (no token required)
+npm install -g github:BluPix/docusaurus2pdf
 
 # Generate PDF from your Docusaurus site
-npx @blupix/docusaurus2pdf -i ./my-docusaurus-site -o ./pdf-output
+docusaurus2pdf -i ./my-docusaurus-site -o ./pdf-output
 ```
 
 ## Installation
 
+### Directly from GitHub (Recommended)
+
+You can install the package directly from this repository. No GitHub token is required, and the package will automatically build during installation.
+
+```bash
+npm install -g github:BluPix/docusaurus2pdf
+```
+
 ### From GitHub Packages
 
-This package is published to the GitHub Packages registry. Before installing, configure your npm client to use the GitHub registry for the `@blupix` scope.
+This package is also published to the GitHub Packages registry. Before installing, configure your npm client to use the GitHub registry for the `@blupix` scope.
 
 Create or edit your `~/.npmrc` file (or a local `.npmrc` in your project) and add:
 

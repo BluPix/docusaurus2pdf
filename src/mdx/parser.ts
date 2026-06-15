@@ -517,6 +517,13 @@ export class MDXParser {
   private preprocessTextSegment(content: string, frontmatter: Record<string, unknown>): string {
     let result = content;
 
+    // 0. Fix admonitions with spaces (e.g., "::: warning" -> ":::warning")
+    result = result.replace(/^(\s*:{3,5})\s+([a-zA-Z]+)(.*)$/gm, '$1$2$3');
+
+    // 0.1 Isolate lines that contain only images so they are parsed as block figures
+    // even if the user forgot to add blank lines around them.
+    result = result.replace(/^([ \t]*((?:!\[[^\]]*\]\([^)]*\)[ \t]*)+)(?:\{[^{}]*\})?)([ \t]*)$/gm, '\n$1\n');
+
     // 1. Substitute frontmatter variables like {{ key }}
     result = result.replace(/\{\{(\s*\w+\s*)\}\}/g, (match, varName) => {
       const key = varName.trim();
@@ -854,12 +861,12 @@ export class MDXParser {
       case 'image':
         // Inline image (inside a paragraph with text, a link, a table cell...).
         // Image-only paragraphs are turned into figures in compileChildren.
-        return this.buildIncludeGraphics(node.url || '');
+        return `\\allowbreak{}${this.buildIncludeGraphics(node.url || '')}\\allowbreak{}`;
 
       case 'imageReference': {
         const def = this.ctx.definitions.get(node.identifier);
         if (def) {
-          return this.buildIncludeGraphics(def.url);
+          return `\\allowbreak{}${this.buildIncludeGraphics(def.url)}\\allowbreak{}`;
         }
         // Unresolved reference: render as Docusaurus would (literal text)
         return this.escapeTextAndEmoji(`![${node.alt || ''}][${node.identifier}]`);

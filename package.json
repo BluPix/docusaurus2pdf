@@ -45,6 +45,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc",
     "postinstall": "npx puppeteer browsers install chrome-headless-shell || true; node -e \"const fs=require('fs');const p='vendor/plantuml.jar';try{const s=fs.statSync(p).size;if(s<1000){console.log('Downloading PlantUML JAR (~8MB)...');require('child_process').execSync('curl -L -o '+p+' https://github.com/plantuml/plantuml/releases/download/v1.2024.0/plantuml-1.2024.0.jar',{stdio:'inherit'});console.log('PlantUML JAR downloaded');}}catch(e){console.log('Downloading PlantUML JAR...');require('child_process').execSync('curl -L -o '+p+' https://github.com/plantuml/plantuml/releases/download/v1.2024.0/plantuml-1.2024.0.jar',{stdio:'inherit'});console.log('PlantUML JAR downloaded');}\"",
     "dev": "tsx src/cli.ts",
